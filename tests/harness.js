@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { FILE_ICON_ASSETS } from '../web/lib/file-types.js';
 import {MIGRATION_NAMES,statements} from '../src/schema/plan.js';
 export const digest=value=>createHash('sha256').update(value).digest('hex');
-export async function createHarness({assets=false,setup=true,migrations=8}={}){
+export async function createHarness({assets=false,setup=true,migrations=MIGRATION_NAMES.length}={}){
   const bundle=await build({entryPoints:['src/worker.js'],bundle:true,write:false,format:'esm',platform:'browser',loader:{'.sql':'text'}});
   const staticFiles=new Map();
   if(assets){

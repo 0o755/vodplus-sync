@@ -1,5 +1,13 @@
 # 架构与约束
 
+## 通用 v2 层
+
+`src/generic/` 分离输入校验、数据发布、文件发布、完整清单确认、数据库快照和恢复会话。JSON 记录在现有 entities 中使用 `record` 类型，namespace/key/value 是不透明信封；触发器仍生成历史。旧业务类型仅通过 `legacy.<kind>` 作为不透明数据读取，旧 API 保留兼容。
+
+完整推送使用 publish_sessions / publish_items，只在 finish 事务中删除范围内遗漏项。恢复使用 restore_sessions / restore_snapshots / restore_items 在 D1 内固定快照和计算差异，每页最多 25 项，文件字节按需读取。restore_baselines 只在成功确认后更新；restore_known 与 dirty 标记保证中断后的重新开始不会遗漏部分应用的内容或删除。过期传输包会清理，已确认基线和必要已知路径保留。
+
+新协议没有客户端版本冲突流程，同一 namespace/key 或路径按服务器提交顺序覆盖。下面“提交与冲突”描述保留的旧接口与后台编辑机制；新接入遵循 [v2 契约](SYNC_V2.md)。
+
 ## 分层
 
 `worker.js` 负责请求分发和统一响应。`auth.js` 区分管理员 Cookie、设备 Bearer 和分享 Bearer。`admin.js` 管理人物/设备；`sync/` 负责实体与版本；`shares.js` 只读发布；`maintenance.js` 清理过期短期数据。前端使用 Tailwind CSS 组件样式层和原生 ES modules。样式由构建脚本本地编译，无外部 CDN 或浏览器内 CSS 编译器。

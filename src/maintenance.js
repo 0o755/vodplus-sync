@@ -8,4 +8,15 @@ export async function maintenance(env) {
     env.DB.prepare('DELETE FROM rate_limits WHERE expires<?').bind(now),
     env.DB.prepare('DELETE FROM events WHERE created<?').bind(now - 30 * 86400000)
   ]);
+  // 已确认基线与未确认的已知路径保留；过期传输包可丢弃，重启恢复会强制全量。
+  const expired='SELECT token FROM restore_sessions WHERE expires<? AND token NOT IN (SELECT session FROM restore_baselines)';
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM restore_items WHERE session IN (${expired})`).bind(now),
+    env.DB.prepare(`DELETE FROM restore_snapshots WHERE session IN (${expired})`).bind(now),
+    env.DB.prepare(`DELETE FROM restore_sessions WHERE token IN (${expired})`).bind(now)
+  ]);
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM publish_items WHERE session IN (SELECT token FROM publish_sessions WHERE expires<?)').bind(now),
+    env.DB.prepare('DELETE FROM publish_sessions WHERE expires<?').bind(now)
+  ]);
 }

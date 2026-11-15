@@ -1,7 +1,8 @@
 // 从项目自带迁移生成幂等补齐计划，普通访问不删除或覆盖已有业务数据。
 export const MIGRATION_NAMES=[
   '0001_initial.sql','0002_d1_files.sql','0003_permanent_shares.sql','0004_sync_lookup.sql',
-  '0005_sync_settings.sql','0006_device_config.sql','0007_excluded_directories.sql','0008_factory_reset.sql'
+  '0005_sync_settings.sql','0006_device_config.sql','0007_excluded_directories.sql','0008_factory_reset.sql',
+  '0009_generic_sync.sql'
 ];
 
 export function statements(sql){

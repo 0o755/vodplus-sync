@@ -9,6 +9,7 @@ import {adminDeviceConfigRoute,syncDeviceConfigRoute} from './devices/routes.js'
 import {accountRoute} from './account.js';
 import {health,failureCode} from './diagnostics.js';
 import {ensureSchema} from './schema/ensure.js';
+import {genericRoute} from './generic/routes.js';
 
 export default {
   async scheduled(_event, env) { await ensureSchema(env);await maintenance(env); },
@@ -23,6 +24,7 @@ export default {
         response = await accountRoute(env,request,url) || await adminDeviceConfigRoute(env,request,url) || await adminRoute(env, request, url) || await manageShare(env, request, url);
       }
       if (!response && url.pathname.startsWith('/api/sync/')) {const current=await device(env,request);response=await syncDeviceConfigRoute(env,request,url,current)||await syncRoute(env,request,url,current);}
+      if (!response && url.pathname.startsWith('/api/v2/sync/')) response=await genericRoute(env,request,url,await device(env,request));
       if (!response && url.pathname.startsWith('/share/')) response = await shareRoute(env, request, url);
       if (!response) {
         assert(!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/share/'), 404, '接口不存在');
@@ -37,7 +39,7 @@ export default {
         const code=failureCode(error);const requestId=crypto.randomUUID();
         // 不记录完整 URL、SQL、错误正文和头部，避免凭证进入日志。
         const path=new URL(request.url).pathname;
-        const operation=path.startsWith('/api/sync/')?'sync':path.startsWith('/api/admin/')?'admin':path.startsWith('/share/')?'share':'other';
+        const operation=path.startsWith('/api/sync/')||path.startsWith('/api/v2/sync/')?'sync':path.startsWith('/api/admin/')?'admin':path.startsWith('/share/')?'share':'other';
         console.error(JSON.stringify({event:'request_failed',requestId,operation,code}));
         return secure(json({error:code==='SCHEMA_NOT_READY'?'服务数据准备失败，请稍后重试':code==='DATABASE_LIMIT'?'数据库额度或容量已达限制':'服务暂时不可用',detail:{code,requestId}},500));
       }

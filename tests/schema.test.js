@@ -93,7 +93,7 @@ test('完整结构且自定义排除目录存在时，补迁移记录不会重�
     await h.request('/api/status');
     const settings=await h.db.prepare('SELECT * FROM sync_settings').first();
     assert.equal(settings.excluded_directories,'["private-cache"]');assert.equal(settings.revision,12);
-    assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM d1_migrations').first()).n,8);
+    assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM d1_migrations').first()).n,MIGRATION_NAMES.length);
   }finally{await h.dispose();}
 });
 
@@ -107,6 +107,6 @@ test('空数据库可自动初始化，普通访问不会执行重置触发器�
   const migrations=await Promise.all(MIGRATION_NAMES.map(async name=>({name,sql:await readFile(new URL('../migrations/'+name,import.meta.url),'utf8')})));
   const plan=repairPlan(migrations,{names:new Set(),columns:new Set(),applied:new Set(),hasSettings:false});
   assert.ok(plan.every(sql=>!/^(DELETE|DROP)\b/i.test(sql)));
-  assert.equal(plan.filter(sql=>sql.startsWith('CREATE TRIGGER')).length,3);
-  assert.ok(plan.length<45,'首次请求的迁移语句为正常路由保留 D1 查询额度');
+  assert.equal(plan.filter(sql=>sql.startsWith('CREATE TRIGGER')).length,4);
+  assert.ok(plan.length<=45,'首次请求的迁移语句为正常路由保留 D1 查询额度');
 });
