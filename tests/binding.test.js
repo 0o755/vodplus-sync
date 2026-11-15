@@ -25,6 +25,12 @@ test('失效、已消费、停用人物与无效设备名称都不产生越权�
 test('并发消费同一无用户名绑定请求仍只能成功一次',async()=>{
   const code=await newCode();const responses=await Promise.all([bind(code),bind(code)]);assert.deepEqual(responses.map(r=>r.status).sort(),[201,401]);
 });
+test('expectedUserId 不匹配返回 409，既不消费码也不创建设备',async()=>{
+  const code=await newCode();const before=(await h.db.prepare('SELECT COUNT(*) n FROM devices').first()).n;
+  const mismatch=await h.request('/api/bind',{method:'POST',data:{code,deviceName:'已有安装',expectedUserId:crypto.randomUUID()}});
+  assert.equal(mismatch.status,409);assert.equal(mismatch.value.detail.code,'USER_MISMATCH');assert.equal((await h.db.prepare('SELECT consumed FROM bindings WHERE hash=?').bind(digest(code)).first()).consumed,0);assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM devices').first()).n,before);
+  const correct=await h.request('/api/bind',{method:'POST',data:{code,deviceName:'已有安装',expectedUserId:owner}});assert.equal(correct.status,201);assert.equal(correct.value.userId,owner);
+});
 test('唤起链接严格遵守共同契约，只带 server 和 code',()=>{
   const code='0'.repeat(64);const links=bindingLinks('https://sync.example.com:8443/',code);const url=new URL(links.direct);
   assert.equal(url.protocol,'vodplus:');assert.equal(url.hostname,'sync');assert.equal(url.pathname,'/bind');assert.deepEqual([...url.searchParams.keys()],['server','code']);assert.equal(url.searchParams.get('server'),'https://sync.example.com:8443');assert.equal(url.searchParams.get('code'),code);

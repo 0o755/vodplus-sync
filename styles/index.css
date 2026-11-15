@@ -2,6 +2,7 @@
 @import "tailwindcss";
 @import "./components.css";
 @import "./workspace.css";
+@import "./resources.css";
 @source "../web";
 @theme { --font-sans: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
 @layer base {

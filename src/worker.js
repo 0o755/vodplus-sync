@@ -5,6 +5,7 @@ import { adminRoute } from './admin.js';
 import { syncRoute } from './sync/routes.js';
 import { manageShare, shareRoute } from './shares.js';
 import { maintenance } from './maintenance.js';
+import {adminDeviceConfigRoute,syncDeviceConfigRoute} from './devices/routes.js';
 
 export default {
   async scheduled(_event, env) { await maintenance(env); },
@@ -13,9 +14,9 @@ export default {
       const url = new URL(request.url); let response = await authRoute(env, request, url.pathname);
       if (!response && url.pathname.startsWith('/api/admin/')) {
         await admin(env, request);
-        response = await adminRoute(env, request, url) || await manageShare(env, request, url);
+        response = await adminDeviceConfigRoute(env,request,url) || await adminRoute(env, request, url) || await manageShare(env, request, url);
       }
-      if (!response && url.pathname.startsWith('/api/sync/')) response = await syncRoute(env, request, url, await device(env, request));
+      if (!response && url.pathname.startsWith('/api/sync/')) {const current=await device(env,request);response=await syncDeviceConfigRoute(env,request,url,current)||await syncRoute(env,request,url,current);}
       if (!response && url.pathname.startsWith('/share/')) response = await shareRoute(env, request, url);
       if (!response) {
         assert(!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/share/'), 404, '接口不存在');

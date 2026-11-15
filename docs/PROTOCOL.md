@@ -17,6 +17,8 @@ Content-Type: application/json
 
 管理员使用 `/api/setup` 和 `/api/login` 建立 Cookie 会话。空库可直接 POST `{username,password}` 到 setup，密码最低 5 位；已有管理员返回 409。不需要初始化 Secret，不将管理员密码或 Cookie 交给 App。
 
+已有安装可在 bind 中增加 `expectedUserId`。有效码属于另一人物时返回 409 / USER_MISMATCH，并在同一事务内保证不消费码、不创建设备；新安装不传该字段。App 仍需校验返回 userId，保留原凭证和队列。
+
 ## 一键绑定与同步规则
 
 后台在用户绑定弹窗生成链接：`vodplus://sync/bind?server=<encodeURIComponent(HTTPS服务根地址)>&code=<encodeURIComponent(设备码)>`。仅在用户点击时打开；不携带用户名、管理员凭据或设备 token。可选 Android 兼容入口为 `intent://sync/bind?...#Intent;scheme=vodplus;package=com.fongmi.vodplus;end`。App 必须校验 HTTPS、参数和现有身份，不能静默覆盖不同人物的本地队列。设备码仍为 10 分钟有效、单次消费。
@@ -150,6 +152,10 @@ Content-Type: application/json
 
 密码错误 401，尝试过多 429，接口/人物/目录停用 404，token 被撤销后返回 401；永久 token 不按时间过期。换取 token 的口令只通过 POST 传输，不写到 URL。
 
+## 设备配置控制
+
+新增设备 Bearer 接口：`GET /api/sync/device-config`、`POST /api/sync/device-config/report`。当前值与待应用指令分开，按 deviceId 隔离；字段为 vod/live/theme/wallpaper。读取、刷新、回报序号及幂等语义见 [设备控制协议](DEVICE_CONTROL.md)。
+
 ## 管理 API 速查
 
 管理员 Cookie 会话下：
@@ -163,6 +169,8 @@ Content-Type: application/json
 | PATCH `/api/admin/users/:id` | `{name?,enabled?}` |
 | POST `/api/admin/users/:id/binding` | 一次性设备码 |
 | PATCH `/api/admin/devices/:id` | `{name?,revoked?}` |
+| GET/PUT `/api/admin/devices/:id/config` | 查看实际回报；按 opId/baseRevision 下发字段 |
+| POST `/api/admin/devices/:id/config/refresh` | 请求设备重新采集当前值 |
 | GET `/api/admin/spaces/:owner/entities` | 文件与记录清单 |
 | PUT `/api/admin/spaces/:owner/blobs/:hash` | 完整内容上传 |
 | POST `/api/admin/spaces/:owner/commit` | 同步格式的版本提交 |

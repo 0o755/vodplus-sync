@@ -2,6 +2,9 @@
 import { icon } from './icons.js';
 export const $=selector=>document.querySelector(selector);
 let unsaved=false;
+let pageCleanups=[];
+export const onPageLeave=callback=>pageCleanups.push(callback);
+export function cleanupPage(){for(const callback of pageCleanups)callback();pageCleanups=[];}
 export const setUnsaved=value=>{unsaved=value;};
 export const canLeave=()=>!unsaved||window.confirm('当前内容尚未保存，放弃修改吗？');
 window.addEventListener('beforeunload',event=>{if(unsaved){event.preventDefault();event.returnValue='';}});

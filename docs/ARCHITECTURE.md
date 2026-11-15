@@ -44,6 +44,12 @@ D1 的 `entities` 保存文件、目录、history、progress、search、config �
 - 路径拒绝绝对路径、反斜杠、冒号、点路径、控制符、百分号编码和 Windows 保留名。设备还须防止自身资源根目录中的符号链接逃逸。
 - 返回 CSP、no-store、nosniff、no-referrer；脚本内容作为纯文本下载，不执行在后台页面中。所有前端用户文本先转义。
 
+## 设备配置控制
+
+`devices/config.js` 保存单设备 desired/revision 和 reported/applied_revision，管理员写入使用已有 receipts 保证 opId 幂等。新指令只合并尚未确认的待办；设备本机在已确认之后的配置变化不会被无关的新指令覆盖。
+
+回报 sequence 必须单调递增，过时或越界的应用/刷新版本被拒绝，同序号同内容可重试。界面轮询只是查看回报，不负责代替 App 加载。刷新请求与实际回报序号分开，旧回报不会被标记为本次实时取值。
+
 ## 当前边界
 
 单管理员；没有多租户组织、远程爬虫执行、定时抓取或协作编辑器。“爬虫管理”是资源与配置管理，不在 Worker 中运行 Python/JS 爬虫。

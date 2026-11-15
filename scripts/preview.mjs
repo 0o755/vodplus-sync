@@ -8,6 +8,7 @@ const h=await createHarness({assets:true,setup:!setupOnly});
 for(const name of setupOnly?[]:['林女士','小满','父亲']){
   const owner=await h.createUser(name);const device=await h.bind(owner,name);
   await h.request(`/api/admin/devices/${device.deviceId}`,{method:'PATCH',data:{name:name==='林女士'?'客厅电视':name==='小满'?'学习平板':'父亲的手机'}});
+  await h.request('/api/sync/device-config/report',{method:'POST',token:device.token,data:{sequence:1,appliedRevision:0,refreshRevision:0,values:{vod:'https://example.com/vod.json',live:'https://example.com/live.m3u8',theme:'system',wallpaper:''}}});
   for(const path of ['影视线路','直播配置'])await h.request(`/api/admin/spaces/${owner}/commit`,{method:'POST',data:{opId:crypto.randomUUID(),patch:{id:crypto.randomUUID(),kind:'directory',path,baseVersion:0}}});
   await h.put(owner,'影视线路/example.py','# 示例脚本，仅用于界面预览\nclass Spider:\n    def getName(self):\n        return "示例资源"\n');
   await h.put(owner,'直播配置/example.m3u8','#EXTM3U\n');

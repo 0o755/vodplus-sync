@@ -1,5 +1,5 @@
 // 管理员、设备和分享分别认证；无管理员时开放一次初始化。
-import { assert, body, json, name } from './lib/http.js';
+import { assert, body, json, name, id } from './lib/http.js';
 import { digest, equal, password, token, verify } from './lib/crypto.js';
 import { one, run } from './lib/db.js';
 
@@ -45,13 +45,16 @@ export async function authRoute(env, request, path) {
     // 设备创建与绑定码消费在同一事务内，失败不会烧掉绑定码。
     // 兼容旧请求中的 username 字段，但人物归属始终只由设备码确定。
     const deviceName = name(input.deviceName);
+    const expectedUserId = input.expectedUserId === undefined ? null : id(input.expectedUserId);
     const results = await env.DB.batch([
-      env.DB.prepare('INSERT INTO devices(id,user_id,name,token_hash,last_seen) SELECT ?,b.user_id,?,?,? FROM bindings b JOIN users u ON u.id=b.user_id AND u.enabled=1 WHERE b.hash=? AND b.consumed=0 AND b.expires>?').bind(deviceId, deviceName, await digest(credential), now, hash, now),
+      env.DB.prepare('SELECT b.user_id FROM bindings b JOIN users u ON u.id=b.user_id AND u.enabled=1 WHERE b.hash=? AND b.consumed=0 AND b.expires>? AND ? IS NOT NULL AND b.user_id<>?').bind(hash,now,expectedUserId,expectedUserId),
+      env.DB.prepare('INSERT INTO devices(id,user_id,name,token_hash,last_seen) SELECT ?,b.user_id,?,?,? FROM bindings b JOIN users u ON u.id=b.user_id AND u.enabled=1 WHERE b.hash=? AND b.consumed=0 AND b.expires>? AND (? IS NULL OR b.user_id=?)').bind(deviceId, deviceName, await digest(credential), now, hash, now,expectedUserId,expectedUserId),
       env.DB.prepare('UPDATE bindings SET consumed=1 WHERE hash=? AND EXISTS(SELECT 1 FROM devices WHERE id=?)').bind(hash, deviceId),
       env.DB.prepare('SELECT d.user_id,u.name username FROM devices d JOIN users u ON u.id=d.user_id WHERE d.id=?').bind(deviceId)
     ]);
-    assert(results[0].meta.changes === 1, 401, '设备码无效、已使用或过期，或所属用户已停用');
-    const row = results[2].results[0];
+    assert(!results[0].results.length, 409, '设备码属于另一人物，原绑定保持不变', {code:'USER_MISMATCH'});
+    assert(results[1].meta.changes === 1, 401, '设备码无效、已使用或过期，或所属用户已停用');
+    const row = results[3].results[0];
     return json({ deviceId, userId: row.user_id, token: credential, username: row.username }, 201);
   }
   assert(typeof input.password === 'string' && input.password.length >= 5 && input.password.length <= 200, 400, '密码需要 5–200 个字符');
