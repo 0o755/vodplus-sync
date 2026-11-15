@@ -5,6 +5,7 @@ import { all, one, run } from './lib/db.js';
 import { throttle } from './auth.js';
 import { ownerExists } from './admin.js';
 import { entities } from './sync/store.js';
+import { getContent } from './storage/content.js';
 
 async function issue(env, share, base) {
   const raw = token(); const expires = Date.now() + 30 * 86400000;
@@ -77,7 +78,7 @@ export async function shareRoute(env, request, url) {
   if (match[2].startsWith('line/')) { const group = decodeURIComponent(match[2].slice(5)); return json({ sites: sites(scripts.filter(r => parent(r) === group)), lives }); }
   const fileMatch = match[2].match(/^files\/([^/]+)\/[^/]+$/);
   assert(fileMatch, 404, '接口不存在'); const file = rows.find(r => r.id === fileMatch[1]); assert(file, 404, '文件不在发布范围或已停用');
-  const object = await env.BUCKET.get(`${share.owner}/${file.data.hash}`); assert(object, 404, '内容不存在');
+  const object = await getContent(env, share.owner, file.data.hash); assert(object, 404, '内容不存在');
   if (/\.json$/i.test(file.path)) {
     let config; try { config = JSON.parse(await object.text()); } catch { assert(false, 422, '配置 JSON 无法解析'); }
     const pathKeys = new Set(['api','url','spider','ext','jsPath','path','file','logo','wallpaper']);

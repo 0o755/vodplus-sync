@@ -4,7 +4,7 @@
 
 ## 自动测试
 
-`npm test` 使用实际 workerd、D1 SQLite 和 R2 本地模拟器运行 20 项集成测试：
+`npm test` 共 29 项通过：20 项既有功能测试、3 项 D1 文件存储测试和 6 项部署流程回归。功能测试使用实际 workerd 与 D1 SQLite，不配置 R2；部署流程通过模拟远端资源状态验证顺序与错误处理。
 
 - 管理接口匿名访问、初始化重复提交与 Origin 校验。
 - 绑定码重复/并发消费，预建用户名限制。
@@ -25,7 +25,9 @@
 
 `npm run check` 编译检查服务端、前端和参考客户端模块。
 
-`npm run build` 执行 Wrangler dry-run，验证入口、静态资源和 DB/BUCKET/ASSETS 绑定配置，不产生远端资源。
+`npm run build` 执行 Wrangler dry-run，验证入口、静态资源和 DB/ASSETS 绑定配置，不产生远端资源。
+
+新增覆盖：完整 1.5 MiB 随机二进制、UTF-8 跨存储块、空文件、内容去重、首次创建 D1、已有 D1 重试、迁移失败不发布、错误 ID 不改建新库、并发建库和自定义绑定。
 
 ## 浏览器
 
@@ -34,7 +36,7 @@
 ## 尚未验证
 
 - 真实 GitHub 仓库经 Deploy 按钮到 Cloudflare 资源创建、Secret 注入、迁移、线上访问的完整链路。
-- Cloudflare 真实账户套餐配额、域名、R2 开通和实际 CPU/存储费用。
+- Cloudflare 真实账户套餐配额、域名、免费套餐实际 CPU/存储上限。
 - Android 设置页、Room/outbox、文件监听、扫描停用、崩溃恢复与真机多设备同步。
 - ys 全部 Python/JS/PHP 引擎对带 token URL 和脚本内部相对 import 的兼容性。
 

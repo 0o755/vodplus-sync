@@ -1,63 +1,84 @@
-# 部署与发布
+# 简单部署：Workers + D1
 
-本项目部署为单个 Worker，静态资源随代码一起发布。D1 和 R2 是必需绑定，不使用 WebSocket 或 Durable Objects。
+当前版本仅使用 Workers 与 D1，文件、版本和用户记录都存放在 D1。**不使用 R2，不需要开通 R2 或填写其信用卡、账单地址等支付资料。** 可以使用 Cloudflare 免费计划部署。
 
-## 官方一键部署
+## 直接部署
 
-Cloudflare 的 Deploy 按钮会复制公开 GitHub/GitLab 仓库，创建资源，并通过 Workers Builds 构建部署。需要登录自己的 Cloudflare/GitHub 账户、授权仓库访问，并在账户中启用 R2；这不是无需账户的匿名部署。
+1. 打开 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2F0o755%2Fvodplus-sync)，连接 GitHub。
+2. D1 选择“新建”；如果此前失败部署已经创建了数据库，可以选择该已有数据库。位置保持 Automatic，暂不启用读取复制。
+3. 填写 `BOOTSTRAP_SECRET`：至少 32 位随机密钥，保存下来用于首次初始化。
+4. 保留构建命令 `npm run build`、部署命令 `npm run deploy`，点击“部署”。
+5. 成功后打开 Worker 地址，用初始化密钥创建后台管理员账号与密码。管理员密码至少 12 位；初始化成功后可删除 Cloudflare 中的 BOOTSTRAP_SECRET。
 
-直接部署可点击 [本仓库的官方部署入口](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2F0o755%2Fvodplus-sync)，然后从下面第 4 步继续。维护自己的 Fork 时，先完成第 1–3 步。
+新的部署页面应只出现 D1，不再要求 R2。若仍看到 R2，说明当前打开的是旧模板或旧代码，需要关闭旧创建流程，从最新 README 的按钮重新进入。
 
-1. 创建自己的公开 GitHub 仓库或 Fork。原仓库尚未指定开源许可证，修改分发前应先明确授权。
-2. 运行 `node scripts/release-link.mjs https://github.com/OWNER/REPOSITORY`。它仅把 README 的预留区域替换为真实仓库的官方按钮。
-3. 提交源码、`package-lock.json`、迁移、Wrangler 配置和 `.dev.vars.example`。不要提交 `.dev.vars`、`.env`、`.wrangler`、任何用户导出或测试凭证。
-4. 点击 README 按钮。页面将识别 `wrangler.jsonc` 的 DB、BUCKET 绑定及 `.dev.vars.example` 声明的 `BOOTSTRAP_SECRET`。
-5. 为初始化密钥填写独立随机值，至少 32 位。不要沿用测试服务中的 fixture 值。
-6. 保留检测到的构建命令 `npm run build` 与部署命令 `npm run deploy`。部署脚本先以 **DB 绑定名**执行远端迁移，再发布 Worker。
-7. 首次打开 Worker URL，填写初始化密钥、管理员名和至少 12 位密码。初始化只能成功一次；之后可从 Cloudflare Secrets 删除 `BOOTSTRAP_SECRET`。
+Cloudflare 可能要求新建 Git 仓库；如果名称与已有仓库冲突，可以改成 `vodplus-sync-deploy`。部署副本不会自动跟随上游更新，后续需要同步修复代码。
 
-`web/deploy.html` 还提供仓库地址输入入口：校验 GitHub 地址后生成官方 Deploy 链接。它不读取 Cloudflare 凭证、不代替官方授权页。
+## 已经遇到 R2 10085 错误
 
-Wrangler 配置省略 `database_id`，供 Deploy 流程自动创建并绑定 D1；R2 使用可被模板流程重命名的默认 bucket 名。Deploy 模板流程负责资源预配置，运行迁移时资源必须已经存在。**不要将下面的本地 CLI 部署流程与模板预配置混淆。**
+这是旧版配置声明了不存在的存储桶造成的。当前修复已取消 R2 依赖：
 
-## 已有仓库的手动部署
+- **不需要激活 R2，不需要创建存储桶，也不需要删除已创建的 D1。**
+- 若保留现有 Worker，先把它实际连接的 Git 仓库更新到本修复版本；Fork/部署副本需要同步上游，不能仅重试旧提交。
+- 在 Worker 的构建设置确认部署命令是 `npm run deploy`，触发最新代码的新构建。
+- 新脚本会从临时部署配置移除旧 R2 绑定，复用已有 D1，并应用缺失的迁移。它不会删除账户内的任何资源。
+- 若旧部署页面强制要求 R2，请退出旧模板流程，重新打开最新的部署按钮。
 
-先运行 `npm ci --ignore-scripts`，使用 Wrangler 登录 Cloudflare。首次 CLI 部署时先创建资源：
+以前真正用 R2 保存过文件的其他安装，升级前需要单独迁移文件字节；本次修复不会声称已经自动迁移那些对象。当前用户的失败部署尚未上线，不需要进行该数据搬迁。
+
+## 部署脚本做什么
+
+`scripts/deploy.mjs` 串行执行：
+
+1. 用 Wrangler 列出 D1，按已选 ID 或名称复用；仅在没有指定 ID 且同名库不存在时创建。
+2. 将确认后的真实数据库 ID 写入本次临时配置。
+3. 用该配置执行 `d1 migrations apply DB --remote`，包括初始元数据表和 `0002_d1_files.sql` 文件存储表。
+4. 迁移成功后，使用同一配置发布 Worker。
+5. 无论成功失败，删除临时配置。
+
+不存在的显式 ID、权限错误、网络错误和迁移错误都会停止发布，不会偷偷切换到空数据库。临时配置和 Wrangler 登录态不提交仓库。
+
+## 本地开发与手动部署
+
+需要 Node.js 22+。执行：
+
+```text
+npm ci --ignore-scripts
+npm run db:local
+npm run dev
+```
+
+把 `.dev.vars.example` 复制为 `.dev.vars`，为 BOOTSTRAP_SECRET 填入随机值。本地文件不上传 GitHub。
+
+手动远端部署可使用：
 
 ```text
 npx wrangler login
-npx wrangler d1 create vodplus-sync
-npx wrangler r2 bucket create vodplus-sync-files
-```
-
-把 D1 返回的 `database_id` 写入 `wrangler.jsonc` 对应 DB 项；如资源名被占用，调整 D1 名称与 R2 bucket 名。然后：
-
-```text
-npx wrangler secret put BOOTSTRAP_SECRET
 npm run deploy
+npx wrangler secret put BOOTSTRAP_SECRET
 ```
 
-首次 secret 操作可能提示先建立 Worker，可按 Wrangler 提示建立空 Worker；也可以先执行 `npx wrangler deploy` 完成资源绑定，再设置 Secret，最后 `npm run deploy` 执行迁移。未迁移时 API 会显示服务未就绪，且没有公开注册绕过入口。
+部署脚本会处理数据库创建和迁移。手动流程中先完成部署，再设置初始化 Secret；Secret 未设置时不允许任何访客创建管理员。Deploy 按钮流程会在页面中要求填写该 Secret。
 
-上述命令供使用者在自己的终端执行；本次开发没有调用 Windows cmd、PowerShell，也没有实际运行远端部署命令。
+## 免费额度与容量
 
-## 本地开发
+D1 免费计划每个数据库最多 **500 MB**，账户总计 5 GB；每天有 500 万行读取和 10 万行写入额度。超过免费限额时相关请求会失败，需要等待额度恢复或整理容量，不是自动启用 R2 计费。
 
-`.dev.vars` 只存本地初始化密钥。`npm run db:local` 在 `.wrangler` 建立本地 D1；R2 由 Wrangler 本地模拟器提供。`npm run dev` 打开本地 Worker。每次增加迁移后重新执行本地迁移。
+这个项目所有数据共用一个 D1：当前文件、历史内容、记录、日志和索引都计入容量。文件内部采用 Base64 存储，编码约有 1/3 开销，因此不能把 500 MB 当作可上传原始文件的总容量。每个文件仍支持最大 1.5 MiB，重复内容在同一人物内复用。
 
-测试使用独立内存 workerd/D1/R2，不会读取或改变本地开发数据库。临时预览脚本也是内存实例，退出即销毁。预览的固定测试账号只存在于该脚本中，生产 Worker 不导入该脚本。
+目前为长期离线设备保留历史内容，尚未自动回收历史文件。家庭少量配置可以先用免费计划试运行；大量文件和频繁改动应关注 D1 用量。免费计划的实际 CPU 限额仍需线上验证，不能把本地测试当成无限用量保证。
 
 ## 升级与维护
 
-- 保留既有 D1 ID 和 R2 名称，不要为升级换新资源。
-- 新增迁移文件，禁止修改已经在线应用的历史迁移。当前 `0001_initial.sql` 是首次发布基线。
-- `npm run deploy` 会先应用未执行迁移，失败则停止发布。涉及删除列等破坏性迁移前，应先导出 D1 并备份相关 R2 对象。
-- 每天 03:17 UTC 清理过期会话、绑定码、分享凭证、限速记录以及 30 天前的操作日志。
-- 自动清理不触及文件、回执、墓碑和增量日志。监控 D1/R2 用量；目前不支持无人值守的历史内容回收。
-- Worker 默认关闭请求日志采集，避免含分享凭证的 URL 进入应用日志。若启用外部代理或可观测性，请自行脱敏 URL 查询参数。
+- 保留既有 D1 ID；不要为了升级删除或换库。
+- 新增迁移文件，不修改已应用的历史迁移。升级会跳过已应用的迁移。
+- 每天 03:17 UTC 清理过期会话、绑定码、分享凭证、限速记录和 30 天前的操作日志。
+- 自动清理不触及文件内容、幂等回执、墓碑和增量日志。
+- 大规模或破坏性迁移前导出备份。若未来增加旧版本清理，必须同时设计游标过期和重新拉取协议。
+- 默认关闭请求日志采集，避免分享 token 出现在访问日志中。
 
-## 已核验的官方依据
+## 官方依据与验证边界
 
-截至 2026-11-15，已读取官方 [Deploy 按钮说明](https://developers.cloudflare.com/workers/platform/deploy-buttons/) 和 [Wrangler 资源自动配置说明](https://developers.cloudflare.com/workers/wrangler/configuration/#automatic-provisioning)。前者明确说明资源预配置、`.dev.vars.example` Secret 声明、package.json 的构建/部署命令和按绑定名执行 D1 迁移。
+已核对 [D1 限制](https://developers.cloudflare.com/d1/platform/limits/)、[D1 免费额度](https://developers.cloudflare.com/d1/platform/pricing/) 和 [Deploy 按钮说明](https://developers.cloudflare.com/workers/platform/deploy-buttons/)。
 
-本地已通过配置 dry-run 和迁移集成测试；公开仓库为 [0o755/vodplus-sync](https://github.com/0o755/vodplus-sync)。**尚未授权真实 Cloudflare 账户或执行官方按钮的线上端到端部署**。
+本地纯 D1 功能测试、部署流程回归、Wrangler 配置 dry-run 和数据库迁移均有验证；尚未访问用户的 Cloudflare 账户替其完成线上发布。线上结果以本次重新部署日志为准。

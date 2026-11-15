@@ -1,8 +1,35 @@
-// Workers Builds 先完成资源配置，再按绑定名迁移，最后发布服务。
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-const cli=fileURLToPath(new URL('../node_modules/wrangler/bin/wrangler.js',import.meta.url));
-for(const args of [['d1','migrations','apply','DB','--remote'],['deploy']]){
-  const result=spawnSync(process.execPath,[cli,...args],{stdio:'inherit',shell:false,windowsHide:true});
-  if(result.error)throw result.error;if(result.status!==0)process.exit(result.status||1);
+// 先确认 D1，再迁移同一数据库，全部成功后才发布 Worker。
+import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { parse, printParseErrorCode } from 'jsonc-parser';
+import { createWrangler } from './deploy/wrangler.mjs';
+import { provisionDatabase } from './deploy/database.mjs';
+
+export async function deployProject({ root = fileURLToPath(new URL('../', import.meta.url)), runner, log = console.log } = {}) {
+  const errors = [];
+  const config = parse(await readFile(join(root, 'wrangler.jsonc'), 'utf8'), errors, { allowTrailingComma: true });
+  if (errors.length) throw new Error(`Wrangler 配置无效：${printParseErrorCode(errors[0].error)}`);
+  // 兼容首次部署页面生成过的旧配置；仅移除绑定，不删除账户内任何存储桶。
+  delete config.r2_buckets;
+  const configPath = join(root, `.wrangler-deploy-${randomUUID()}.json`);
+  const invoke = runner || createWrangler(root, configPath, config.account_id);
+  const execute = (args, options = {}) => invoke(args, { ...options, configPath });
+  try {
+    // 保持原有相对路径，临时配置始终与源码配置位于同一目录。
+    await writeFile(configPath, JSON.stringify(config, null, 2), { flag: 'wx' });
+    log('[1/3] 确认 D1 数据库，无需 R2');
+    const resolved = await provisionDatabase(config, execute, log);
+    await writeFile(configPath, JSON.stringify(resolved, null, 2));
+    log('[2/3] 应用数据库迁移');
+    await execute(['d1', 'migrations', 'apply', 'DB', '--remote'], { stream: true, configPath });
+    log('[3/3] 发布 Worker');
+    await execute(['deploy'], { stream: true, configPath });
+  } finally {
+    await unlink(configPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  }
+}
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  deployProject().catch(error => { console.error(`部署停止：${error.message}`); process.exitCode = 1; });
 }

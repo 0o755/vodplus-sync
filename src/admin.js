@@ -4,6 +4,7 @@ import { digest, token } from './lib/crypto.js';
 import { all, one, run, event } from './lib/db.js';
 import { entities, commit } from './sync/store.js';
 import { download, upload } from './sync/routes.js';
+import { copyContent, getContent } from './storage/content.js';
 
 export async function ownerExists(env, owner) { assert(owner === 'public' || await one(env, 'SELECT id FROM users WHERE id=?', owner), 404, '人物不存在'); return owner; }
 export async function adminRoute(env, request, url) {
@@ -21,8 +22,7 @@ export async function adminRoute(env, request, url) {
     const snapshot = await one(env, 'SELECT snapshot FROM changes WHERE owner=\'public\' AND entity_id=? AND version=? LIMIT 1', id(input.fileId), input.sourceVersion);
     const source = snapshot && JSON.parse(snapshot.snapshot);
     assert(source?.kind === 'file' && !source.deleted, 404, '公共文件版本不存在'); const data = source.data;
-    const object = await env.BUCKET.get(`public/${data.hash}`); assert(object, 404, '公共内容不存在');
-    await env.BUCKET.put(`${owner}/${data.hash}`, object.body);
+    await copyContent(env, 'public', owner, data.hash);
     const result = await commit(env, owner, `admin:${owner}`, { opId: id(input.opId), patch: { id: id(input.id), kind: 'file', path: input.path, baseVersion: 0, data, enabled: source.enabled } });
     await event(env, owner, null, '公共库复制', input.path); return json(result);
   }
@@ -72,7 +72,7 @@ export async function adminRoute(env, request, url) {
       const row = await one(env, 'SELECT proposed FROM conflicts WHERE owner=? AND id=?', owner, action.split('/')[1]);
       assert(row, 404, '冲突候选不存在'); const patch = JSON.parse(row.proposed).patch;
       assert(patch.kind === 'file', 400, '不是文件候选');
-      const object = await env.BUCKET.get(`${owner}/${patch.data.hash}`); assert(object, 404, '候选内容不存在');
+      const object = await getContent(env, owner, patch.data.hash); assert(object, 404, '候选内容不存在');
       return new Response(object.body, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
     if (action.startsWith('resolve/') && method === 'POST') {

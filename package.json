@@ -13,10 +13,7 @@
         "description": "首次初始化管理员所需的随机密钥，至少 32 位；不能留空或使用示例值。初始化完成后可删除。"
       },
       "DB": {
-        "description": "人物、设备、版本及同步记录。部署脚本自动迁移。"
-      },
-      "BUCKET": {
-        "description": "文件内容存储；需在 Cloudflare 账户启用 R2。"
+        "description": "人物、设备、文件内容、版本及同步记录。仅需 D1，无需开通 R2；部署脚本自动初始化。"
       }
     }
   },
@@ -31,6 +28,7 @@
   },
   "devDependencies": {
     "esbuild": "0.28.2",
+    "jsonc-parser": "3.3.1",
     "miniflare": "4.20260730.0",
     "wrangler": "4.162.0"
   }

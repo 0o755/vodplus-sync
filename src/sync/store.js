@@ -2,6 +2,7 @@
 import { assert, id, relativePath, inside } from '../lib/http.js';
 import { digest } from '../lib/crypto.js';
 import { all, one, stmt, decode } from '../lib/db.js';
+import { contentInfo } from '../storage/content.js';
 
 export const entities = async (env, owner) => (await all(env, 'SELECT * FROM entities WHERE owner=? ORDER BY path,id', owner)).map(decode);
 export const cursor = async (env, owner) => (await one(env, 'SELECT COALESCE(MAX(seq),0) value FROM changes WHERE owner=?', owner)).value;
@@ -25,7 +26,7 @@ export async function validate(env, owner, patch, current, allRows) {
     }
     if (patch.kind === 'file') {
       assert(/^[a-f0-9]{64}$/.test(value.data.hash) && Number.isSafeInteger(value.data.size) && value.data.size >= 0 && value.data.size <= 1572864, 400, '文件摘要或大小无效');
-      const object = await env.BUCKET.head(`${owner}/${value.data.hash}`);
+      const object = await contentInfo(env, owner, value.data.hash);
       assert(object && object.size === value.data.size, 400, '文件内容尚未完整上传');
       value.data = { hash: value.data.hash, size: value.data.size };
     } else value.data = {};

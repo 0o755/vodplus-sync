@@ -1,4 +1,4 @@
-// 使用真实 workerd、D1 SQLite 和 R2 模拟器，避免用内存对象代替事务测试。
+// 使用真实 workerd 和 D1 SQLite，不配置 R2，验证纯 D1 部署也能完整运行。
 import { Miniflare } from 'miniflare';
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
@@ -12,7 +12,7 @@ export async function createHarness({assets=false}={}){
     const files=['index.html','styles.css','app.js','ui.js','share.html','share.js','deploy.html','deploy.js','pages/overview.js','pages/people.js','pages/files.js','pages/file-editor.js','pages/revisions.js'];
     for(const file of files)staticFiles.set('/'+file,await readFile(new URL('../web/'+file,import.meta.url)));
   }
-  const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',d1Databases:['DB'],r2Buckets:['BUCKET'],bindings:{BOOTSTRAP_SECRET:secret},serviceBindings:{ASSETS:request=>{
+  const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',d1Databases:['DB'],bindings:{BOOTSTRAP_SECRET:secret},serviceBindings:{ASSETS:request=>{
     const path=new URL(request.url).pathname;const file=path==='/'?'/index.html':path;
     return staticFiles.has(file)?new Response(staticFiles.get(file),{headers:{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html; charset=utf-8'}}):new Response('Not found',{status:404});
   }}});
@@ -21,6 +21,8 @@ export async function createHarness({assets=false}={}){
   const triggers=[...sql.matchAll(/CREATE TRIGGER[\s\S]*?END;/g)].map(m=>m[0]);
   for(const statement of sql.replace(/CREATE TRIGGER[\s\S]*?END;/g,'').split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
   for(const trigger of triggers)await db.prepare(trigger).run();
+  const fileSql=(await readFile(new URL('../migrations/0002_d1_files.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
+  for(const statement of fileSql.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
   let cookie='';
   const request=async(path,{method='GET',data,token,admin=true,raw,headers={}}={})=>{
     const response=await mf.dispatchFetch('http://localhost'+path,{method,headers:{...(admin&&cookie?{cookie}:{}),...(token?{authorization:`Bearer ${token}`} : {}),...(data?{'content-type':'application/json'}:{}),...headers},body:data?JSON.stringify(data):raw});

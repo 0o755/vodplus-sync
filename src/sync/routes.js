@@ -3,12 +3,13 @@ import { assert, body, bytes, json } from '../lib/http.js';
 import { digest } from '../lib/crypto.js';
 import { all, one, run, event } from '../lib/db.js';
 import { commit, cursor } from './store.js';
+import { putContent, getContent } from '../storage/content.js';
 
 export async function upload(env, request, owner, hash) {
   assert(/^[a-f0-9]{64}$/.test(hash), 400, '摘要无效');
   const content = await bytes(request, 1572864);
   assert(await digest(content) === hash, 422, '内容 SHA-256 不匹配');
-  await env.BUCKET.put(`${owner}/${hash}`, content);
+  await putContent(env, owner, hash, content);
   return json({ hash, size: content.length });
 }
 export async function download(env, owner, entityId, version) {
@@ -16,7 +17,7 @@ export async function download(env, owner, entityId, version) {
   const row = version ? await one(env, 'SELECT snapshot FROM changes WHERE owner=? AND entity_id=? AND version=? LIMIT 1', owner, entityId, Number(version)) : await one(env, 'SELECT data,kind FROM entities WHERE owner=? AND id=?', owner, entityId);
   const value = row?.snapshot ? JSON.parse(row.snapshot) : row && { ...row, data: JSON.parse(row.data) };
   assert(value?.kind === 'file', 404, '文件版本不存在');
-  const object = await env.BUCKET.get(`${owner}/${value.data.hash}`); assert(object, 404, '文件内容不存在');
+  const object = await getContent(env, owner, value.data.hash); assert(object, 404, '文件内容不存在');
   return new Response(object.body, { headers: { 'content-type': 'application/octet-stream', 'x-content-sha256': value.data.hash } });
 }
 export async function syncRoute(env, request, url, device) {
