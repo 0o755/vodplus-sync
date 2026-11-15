@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {createHarness} from './harness.js';
 import {SyncClient} from '../examples/sync-v2-client.js';
 import {maintenance} from '../src/maintenance.js';
+import {publication} from '../src/generic/publication.js';
 const uuid=()=>crypto.randomUUID();
 async function fixture(){
   const h=await createHarness(),owner=await h.createUser('通用用户'),a=await h.bind(owner),b=await h.bind(owner);
@@ -20,6 +21,20 @@ async function fixture(){
   return {...h,owner,a,b,post,push,file,start,pages,ack};
 }
 const scope={namespaces:['example.notes','example.ext'],files:true};
+
+test('清单确认与排除规则并发变化时重读规则，不误删刚排除的目录',async()=>{
+  const h=await fixture();try{
+    await h.file('cache/a.py','keep');
+    const session=(await h.post('push',{action:'start',requestId:uuid(),scope})).value.session;
+    let changed=false;
+    const db={prepare:sql=>h.db.prepare(sql),batch:async statements=>{
+      if(!changed){changed=true;await h.db.prepare('UPDATE sync_settings SET excluded_directories=?,revision=revision+1').bind('["cache"]').run();}
+      return h.db.batch(statements);
+    }};
+    const response=await publication({DB:db},{id:h.a.deviceId,user_id:h.owner},{action:'finish',session});
+    assert.equal(response.status,200);assert.equal((await h.db.prepare("SELECT deleted FROM entities WHERE owner=? AND path='cache/a.py'").bind(h.owner).first()).deleted,0);
+  }finally{await h.dispose();}
+});
 
 test('v2 普通键和 JSON 标量不需要业务 ID，命名空间隔离且重试幂等',async()=>{
   const h=await fixture();try{

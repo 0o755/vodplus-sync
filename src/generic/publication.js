@@ -14,7 +14,7 @@ export async function publishing(env,device,session){
 }
 export const publicationGuard='EXISTS(SELECT 1 FROM publish_sessions WHERE token=? AND device=? AND finished=0 AND expires>?)';
 
-export async function publication(env,device,input){
+export async function publication(env,device,input,attempt=0){
   if(input.action==='start'){
     const id=requestId(input.requestId),scope=scopeValue(input.scope);assert(scope.namespaces.every(ns=>!ns.startsWith('legacy.')),400,'旧数据分区不能用于完整发布');
     const text=JSON.stringify(scope),expires=Date.now()+86400000;
@@ -26,17 +26,20 @@ export async function publication(env,device,input){
   assert(input.action==='finish',400,'不支持的推送操作');
   const row=await one(env,'SELECT * FROM publish_sessions WHERE token=? AND device=? AND owner=?',input.session??'',device.id,device.user_id);
   assert(row,404,'发布会话不存在');if(row.finished)return json({ok:true});assert(row.expires>Date.now(),410,'发布会话已过期，请重新开始');
-  const policy=JSON.stringify(await syncSettings(env)),source=`device:${device.id}`,now=Date.now();
-  await env.DB.batch([
+  const currentPolicy=await syncSettings(env),policy=JSON.stringify(currentPolicy),source=`device:${device.id}`,now=Date.now();
+  // 确认清单与规则版本一起校验，避免刚被排除的文件被旧规则误删。
+  const ready='EXISTS(SELECT 1 FROM publish_sessions WHERE token=? AND finished=0) AND EXISTS(SELECT 1 FROM sync_settings WHERE id=1 AND revision=?)';
+  const result=await env.DB.batch([
     stmt(env,`UPDATE entities SET deleted=1,version=version+1,source=?,updated=? WHERE owner=? AND deleted=0 AND kind='record'
       AND json_extract(data,'$.namespace') IN (SELECT value FROM json_each(?,'$.namespaces'))
       AND NOT EXISTS(SELECT 1 FROM publish_items WHERE session=? AND identity=json_array('data',json_extract(entities.data,'$.namespace'),json_extract(entities.data,'$.key')))
-      AND EXISTS(SELECT 1 FROM publish_sessions WHERE token=? AND finished=0)`,source,now,device.user_id,row.scope,row.token,row.token),
+      AND ${ready}`,source,now,device.user_id,row.scope,row.token,row.token,currentPolicy.revision),
     stmt(env,`UPDATE entities SET deleted=1,version=version+1,source=?,updated=? WHERE owner=? AND deleted=0 AND kind='file' AND json_extract(?,'$.files')=1
       AND ${allowedFile('entities.path')}
       AND NOT EXISTS(SELECT 1 FROM publish_items WHERE session=? AND identity=json_array('file',entities.path))
-      AND EXISTS(SELECT 1 FROM publish_sessions WHERE token=? AND finished=0)`,source,now,device.user_id,row.scope,...policyValues(row.scope,policy),row.token,row.token),
-    stmt(env,'UPDATE publish_sessions SET finished=1 WHERE token=?',row.token)
+      AND ${ready}`,source,now,device.user_id,row.scope,...policyValues(row.scope,policy),row.token,row.token,currentPolicy.revision),
+    stmt(env,'UPDATE publish_sessions SET finished=1 WHERE token=? AND EXISTS(SELECT 1 FROM sync_settings WHERE id=1 AND revision=?)',row.token,currentPolicy.revision)
   ]);
+  if(!result[2].meta.changes){assert(attempt<2,503,'同步规则正在更新，请重试确认',{retryable:true});return publication(env,device,input,attempt+1);}
   return json({ok:true});
 }

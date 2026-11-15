@@ -31,7 +31,7 @@ export async function pushFile(env,request,url,device){
   const condition=`EXISTS(SELECT 1 FROM sync_settings WHERE id=1 AND revision=?)
     AND NOT EXISTS(SELECT 1 FROM entities e JOIN json_each(?) j ON lower(e.path)=lower(json_extract(j.value,'$.path')) WHERE e.owner=? AND e.deleted=0 AND e.kind<>json_extract(j.value,'$.kind'))
     AND (SELECT COUNT(*) FROM entities WHERE owner=?)+(SELECT COUNT(*) FROM json_each(?) j WHERE NOT EXISTS(SELECT 1 FROM entities WHERE owner=? AND lower(path)=lower(json_extract(j.value,'$.path'))))<=5000`;
-  const batch=[receiptStatement(env,device,operation,fingerprint,nonce,result,(deleting?'1':condition)+(scope?' AND '+publicationGuard:''),[...(deleting?[]:[policy.revision,encoded,owner,owner,encoded,owner]),...(scope?[session,device.id,Date.now()]:[])])];
+  const batch=[receiptStatement(env,device,operation,fingerprint,nonce,result,(deleting?'EXISTS(SELECT 1 FROM sync_settings WHERE id=1 AND revision=?)':condition)+(scope?' AND '+publicationGuard:''),[...(deleting?[policy.revision]:[policy.revision,encoded,owner,owner,encoded,owner]),...(scope?[session,device.id,Date.now()]:[])])];
   if(deleting){
     batch.push(stmt(env,`UPDATE entities SET deleted=1,version=version+1,source=?,updated=? WHERE owner=? AND lower(path)=lower(?) AND kind='file' AND deleted=0 AND ${receiptGuard}`,`device:${device.id}`,Date.now(),owner,path,...receiptValues(device,operation,nonce)));
   }else{
