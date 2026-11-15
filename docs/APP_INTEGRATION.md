@@ -43,11 +43,11 @@ ys App 的同步已由对应 Android 项目会话接入。本仓库负责后台�
 
 ## 文件规则与有界并发
 
-每轮开始读取 `GET /api/sync/settings`（设备 Bearer）：`fileExtensions` 默认 py/js/txt/json/m3u8/jar/php/html，`includeExtensionless=true`，`revision=1`。按最后一个点提取后缀，小写比较；无点及 `.hide` 是无后缀，目录始终同步。
+每轮开始读取 `GET /api/sync/settings`（设备 Bearer）：`fileExtensions` 默认 py/js/txt/json/m3u8/jar/php/html，`includeExtensionless=true`，另有 `excludedDirectories`，默认 `_cache`、`__pycache__`、`pycache`；revision 以服务端实际值为准。按最后一个点提取后缀，小写比较；无点及 `.hide` 是无后缀，未排除的目录仍同步。排除规则按任意层级目录段名、不区分大小写，整棵子树跳过；根目录同名普通文件不因目录规则被排除。旧后台缺字段时使用默认三项。
 
 记录上次规则 revision；变化后从 cursor=0 重新核对，按已有版本去重。不匹配的文件只跳过传输，绝不能生成删除操作，不自动清理旧文件，也不丢掉文件元数据或未上传内容。重新允许该类型后，可重新扫描并恢复传输。
 
-文件字节上传/下载可采用有界池，建议从 3–4 个并发请求开始测试；元数据 commit 保持有序。PUT blobs 可以附加编码后的 path 做提前校验；只有 hash 的旧请求仍可暂存内容，但发布新内容的 commit 强制执行规则。422/FILE_TYPE_NOT_ALLOWED 表示策略阻止，应保留待办待规则变化；503/retryable 表示暂时竞争，按 Retry-After 退避，重试原 opId/原 baseVersion。真正的版本冲突仍为 409。
+文件字节上传/下载可采用有界池，建议从 3–4 个并发请求开始测试；元数据 commit 保持有序。PUT blobs 可以附加编码后的 path 做提前校验；只有 hash 的旧请求仍可暂存内容，但发布新内容的 commit 强制执行规则。422/FILE_TYPE_NOT_ALLOWED 或 DIRECTORY_EXCLUDED 表示策略阻止，应保留待办待规则变化；503/retryable 表示暂时竞争，按 Retry-After 退避，重试原 opId/原 baseVersion。真正的版本冲突仍为 409。
 
 `examples/sync-client.js` 是传输参考，宿主需要实现上述策略缓存、过滤与 revision 重扫，不能把示例当作已完成全部 Android 持久化/过滤的客户端。
 
@@ -84,6 +84,10 @@ SQLite 内部事务读取记录快照并写 outbox，不复制活跃数据库文
 按 [设备控制协议](DEVICE_CONTROL.md) 接入独立的轻量检查任务，前台约 5 秒读取待办和刷新序号，不被批量文件传输阻塞。实际加载后才上报 appliedRevision；失败保留成功版本、真实值与错误原因。旧后台的 404 不得影响普通同步。
 
 后台下发的是单设备配置，应用时标记远程/设备级来源并更新防回传基线，不能在下一轮快照或现有配置监听中重新上传成人物共享 config，造成其他设备跟随切换。
+
+## 云端重置
+
+管理员主动重置会清空云端人物和设备凭证，原 App 请求会得到 401。不能自动把旧人物的待上传队列改归新人物。需要用户通过明确的本机同步身份重置/重新绑定流程处理；云端操作不自动删除手机文件和历史。
 
 ## 分享密码适配
 

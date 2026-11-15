@@ -24,7 +24,7 @@ export function on(selector,event,action){const element=$(selector);if(element)e
 function fieldMarkup(field){
   if(field.html)return field.html;
   const control=field.type==='select'?`<select name="${esc(field.name)}">${field.options.map(o=>`<option value="${esc(o.value)}" ${String(o.value)===String(field.value)?'selected':''}>${esc(o.label)}</option>`).join('')}</select>`:
-    `<input name="${esc(field.name)}" type="${field.type||'text'}" value="${esc(field.value||'')}" ${field.required===false?'':'required'} ${field.min?`minlength="${field.min}"`:''} placeholder="${esc(field.placeholder||'')}" autocomplete="${field.type==='password'?'new-password':'off'}">`;
+    `<input name="${esc(field.name)}" type="${field.type||'text'}" value="${esc(field.value||'')}" ${field.required===false?'':'required'} ${field.min?`minlength="${field.min}"`:''} placeholder="${esc(field.placeholder||'')}" autocomplete="${esc(field.autocomplete||(field.type==='password'?'new-password':'off'))}">`;
   return `<label>${esc(field.label)}${control}${field.hint?`<small>${esc(field.hint)}</small>`:''}</label>`;
 }
 export async function form(title,fields,action='保存',options={}){

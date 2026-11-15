@@ -3,17 +3,19 @@ import { Miniflare } from 'miniflare';
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { FILE_ICON_ASSETS } from '../web/lib/file-types.js';
 export const digest=value=>createHash('sha256').update(value).digest('hex');
 export async function createHarness({assets=false,setup=true}={}){
   const bundle=await build({entryPoints:['src/worker.js'],bundle:true,write:false,format:'esm',platform:'browser'});
   const staticFiles=new Map();
   if(assets){
     const files=['index.html','styles.css','app.js','ui.js','icons.js','share.html','share.js','deploy.html','deploy.js','lib/binding-links.js','lib/files-api.js','lib/upload-plan.js','pages/binding.js','pages/sync-settings.js','pages/overview.js','pages/shares.js','pages/people.js','pages/device-config.js','pages/files.js','pages/file-editor.js','pages/file-actions.js','pages/uploads.js','pages/revisions.js'];
+    files.push('lib/file-types.js','lib/file-list.js','pages/account.js',...FILE_ICON_ASSETS);
     for(const file of files)staticFiles.set('/'+file,await readFile(new URL('../web/'+file,import.meta.url)));
   }
   const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',d1Databases:['DB'],serviceBindings:{ASSETS:request=>{
     const path=new URL(request.url).pathname;const file=path==='/'?'/index.html':path;
-    return staticFiles.has(file)?new Response(staticFiles.get(file),{headers:{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html; charset=utf-8'}}):new Response('Not found',{status:404});
+    return staticFiles.has(file)?new Response(staticFiles.get(file),{headers:{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.svg')?'image/svg+xml':'text/html; charset=utf-8'}}):new Response('Not found',{status:404});
   }}});
   const db=await mf.getD1Database('DB');
   const sql=(await readFile(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
@@ -30,6 +32,12 @@ export async function createHarness({assets=false,setup=true}={}){
   for(const statement of settingsSql.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
   const deviceSql=(await readFile(new URL('../migrations/0006_device_config.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
   for(const statement of deviceSql.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+  const excludeSql=(await readFile(new URL('../migrations/0007_excluded_directories.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
+  for(const statement of excludeSql.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+  const resetSql=(await readFile(new URL('../migrations/0008_factory_reset.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
+  const resetTrigger=resetSql.match(/CREATE TRIGGER[\s\S]*?END;/)[0];
+  for(const statement of resetSql.replace(resetTrigger,'').split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+  await db.prepare(resetTrigger).run();
   let cookie='';
   const request=async(path,{method='GET',data,token,admin=true,raw,headers={}}={})=>{
     const response=await mf.dispatchFetch('http://localhost'+path,{method,headers:{...(admin&&cookie?{cookie}:{}),...(token?{authorization:`Bearer ${token}`} : {}),...(data?{'content-type':'application/json'}:{}),...headers},body:data?JSON.stringify(data):raw});

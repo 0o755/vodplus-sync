@@ -66,9 +66,9 @@ async function attemptCommit(env, owner, principal, input, fingerprint) {
   assert(!oldConflict, 409, '此操作已产生冲突，请处理后用新 opId 提交', { conflictId: oldConflict?.id });
   const { checkpoint, rows, current, total, policy } = await readCommitContext(env, owner, input.patch);
   assert(total < 5000 || current, 409, '当前空间已达 5000 条记录，请先归档');
+  const checkPolicy = policy && !input.patch.deleted && (!current || (input.patch.kind==='file' && current.data.hash !== input.patch.data?.hash));
+  if (checkPolicy) assertFileAllowed(policy, input.patch.path, input.patch.kind);
   const proposed = await validate(env, owner, input.patch, current, rows);
-  const checkPolicy = policy && !proposed.deleted && (!current || current.data.hash !== proposed.data.hash);
-  if (checkPolicy) assertFileAllowed(policy, proposed.path);
   const policyRevision = checkPolicy ? policy.revision : null;
   assert(!current?.deleted || proposed.deleted || input.restore === true, 409, '记录已删除，恢复需要显式 restore');
   let patches = [{ ...proposed, baseVersion: input.patch.baseVersion }];

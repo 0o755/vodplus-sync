@@ -3,6 +3,9 @@
  .resource-toolbar { @apply flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 p-4; }
  .resource-toolbar input { @apply w-64 max-w-full text-xs; }
  .resource-toolbar>div { @apply flex flex-wrap gap-2; }
+ .resource-toolbar select { @apply min-h-9 text-xs; }
+ .file-type-icon { @apply h-6 w-6 shrink-0 object-contain; }
+ #new-dir .file-type-icon { @apply h-[18px] w-[18px]; }
  .resource-table { @apply table-fixed; }
  .resource-table .name-col { width:auto; }.resource-table .size-col { width:110px; }.resource-table .date-col { width:150px; }.resource-table .state-col { width:80px; }.resource-table .action-col { width:450px; }
  .resource-name { @apply flex min-w-0 items-center gap-2; }
@@ -39,3 +42,4 @@
 @media(max-width:1100px){.row-actions{display:none}.resource-menu{display:block}.resource-table .action-col{width:90px}.resource-table .size-col{width:110px}.resource-table .state-col{width:70px}}
 @media(max-width:700px){.resource-table .size-col,.resource-table .state-col,.resource-table .size-cell,.resource-table .state-cell{display:none}.row-summary{display:block}.resource-toolbar input{width:100%}.resource-toolbar>div{width:100%}.resource-title{font-size:12px}.resource-name{gap:6px}dialog.editor-modal{max-width:calc(100vw - 16px)}.editor-modal .editor-meta{padding:12px}.editor-modal .code{padding:12px}.resource-table td{padding-left:12px;padding-right:12px}}
 @media(max-width:700px){.device-config-labels{display:none}.device-config-field>div{grid-template-columns:minmax(0,1fr);gap:8px}.device-config-modal .dialog-footer{flex-wrap:wrap}}
+@media(max-width:700px){.resource-filter-tools select{width:100%}.resource-name .file-type-icon{width:22px;height:22px}}

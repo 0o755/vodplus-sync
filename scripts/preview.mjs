@@ -12,6 +12,11 @@ for(const name of setupOnly?[]:['林女士','小满','父亲']){
   for(const path of ['影视线路','直播配置'])await h.request(`/api/admin/spaces/${owner}/commit`,{method:'POST',data:{opId:crypto.randomUUID(),patch:{id:crypto.randomUUID(),kind:'directory',path,baseVersion:0}}});
   await h.put(owner,'影视线路/example.py','# 示例脚本，仅用于界面预览\nclass Spider:\n    def getName(self):\n        return "示例资源"\n');
   await h.put(owner,'直播配置/example.m3u8','#EXTM3U\n');
+  if(name==='林女士'&&process.argv.includes('--file-types')){
+    await h.request(`/api/admin/spaces/${owner}/commit`,{method:'POST',data:{opId:crypto.randomUUID(),patch:{id:crypto.randomUUID(),kind:'directory',path:'影视线路/子目录',baseVersion:0}}});
+    await h.put(owner,'影视线路/子目录/deep.py','# 目录层级预览\n');
+    for(const filename of ['file10.py','file2.py','config.json','loader.js','index.php','page.html','plugin.jar','notes.txt','data'])await h.put(owner,filename,filename.endsWith('.json')?'{}':'仅用于文件类型图标预览。');
+  }
   if(name==='林女士')await h.request('/api/admin/shares',{method:'POST',data:{owner,name:'家庭点播',root:'影视线路',password:'preview-password-123'}});
 }
 if(!setupOnly)await h.put('public','example.js','// 公共示例，不包含真实来源。\nexport const name = "公共资源";\n');

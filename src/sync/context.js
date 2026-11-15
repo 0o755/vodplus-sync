@@ -12,7 +12,7 @@ export async function readCommitContext(env, owner, patch) {
     : 'SELECT id,kind,path,version,deleted,enabled FROM entities WHERE owner=? AND path IS NOT NULL ORDER BY path,id', owner));
   let countIndex; let policyIndex;
   if (patch.baseVersion === 0) { countIndex = statements.length; statements.push(stmt(env, 'SELECT COUNT(*) total FROM entities WHERE owner=?', owner)); }
-  if (patch.kind === 'file' && owner !== 'public') { policyIndex = statements.length; statements.push(stmt(env, 'SELECT * FROM sync_settings WHERE id=1')); }
+  if (files && owner !== 'public') { policyIndex = statements.length; statements.push(stmt(env, 'SELECT * FROM sync_settings WHERE id=1')); }
   const results = await env.DB.batch(statements);
   return {
     checkpoint: results[0].results[0].value,

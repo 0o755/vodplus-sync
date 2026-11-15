@@ -26,12 +26,14 @@ Content-Type: application/json
 每轮同步开始使用设备 Bearer 请求 `GET /api/sync/settings`，返回：
 
 ```json
-{"fileExtensions":["py","js","txt","json","m3u8","jar","php","html"],"includeExtensionless":true,"revision":1}
+{"fileExtensions":["py","js","txt","json","m3u8","jar","php","html"],"includeExtensionless":true,"excludedDirectories":["_cache","__pycache__","pycache"],"revision":2}
 ```
 
-全局默认，后缀小写且不带点。按文件名最后一个点判定，大小写不敏感；无点文件和 `.hide` 视为无后缀，`.hide.json` 的后缀为 json。目录始终同步。
+全局默认，后缀小写且不带点。按文件名最后一个点判定，大小写不敏感；无点文件和 `.hide` 视为无后缀，`.hide.json` 的后缀为 json。未排除的目录仍同步。excludedDirectories 按任意层级目录段名忽略大小写匹配，排除目录本身和整个子树；同名普通文件只按文件规则判断。旧后台缺此字段时客户端采用这三个默认目录名。revision 只需按返回值比较，不要硬编码为 1。
 
 规则 revision 改变时，App 从 cursor=0 重新核对，利用已有 ID/version/hash 避免重复覆盖。不匹配的本地文件不能被当作删除；保留元数据和本地待办，重新允许该类型后可以恢复。服务端 changes 不过滤，旧内容与历史下载保留。
+
+新增排除目录或其下的新文件/内容返回 422，detail.code=`DIRECTORY_EXCLUDED`。变更流和历史读取不裁剪，规则变化也不自动清理旧内容。
 
 规则约束人物空间新文件或内容变化；已存文件删除、移动、停用及相同内容的恢复仍可提交。公共爬虫库不直接参与设备同步，发布不受此规则限制；复制到人物空间时遵守人物同步规则。
 
@@ -163,8 +165,11 @@ Content-Type: application/json
 | 方法 / 路径 | 功能 |
 |---|---|
 | GET `/api/admin/overview` | 用户、设备、发布和最近日志 |
+| GET `/api/admin/account` | 当前管理员名称 |
+| POST `/api/admin/account/password` | currentPassword/newPassword；成功后注销旧会话 |
+| POST `/api/admin/account/reset` | currentPassword/confirmation=RESET；原子清空业务数据 |
 | GET `/api/admin/sync-settings` | 读取全局文件规则 |
-| PUT `/api/admin/sync-settings` | fileExtensions/includeExtensionless/revision；版本冲突返回 409 |
+| PUT `/api/admin/sync-settings` | fileExtensions/includeExtensionless/excludedDirectories/revision；旧请求省略目录字段会保留现有值，版本冲突返回 409 |
 | POST `/api/admin/users` | `{name}` 创建人物 |
 | PATCH `/api/admin/users/:id` | `{name?,enabled?}` |
 | POST `/api/admin/users/:id/binding` | 一次性设备码 |

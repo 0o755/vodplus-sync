@@ -9,7 +9,7 @@ after(async()=>h?.dispose());
 const settings=async()=>(await h.request('/api/sync/settings',{token:device.token})).value;
 const update=async(values)=>h.request('/api/admin/sync-settings',{method:'PUT',data:{...await settings(),...values}});
 test('设备读取准确的全局默认策略，匿名不能读取或修改',async()=>{
-  assert.deepEqual(await settings(),{fileExtensions:['py','js','txt','json','m3u8','jar','php','html'],includeExtensionless:true,revision:1});
+  assert.deepEqual(await settings(),{fileExtensions:['py','js','txt','json','m3u8','jar','php','html'],includeExtensionless:true,excludedDirectories:['_cache','__pycache__','pycache'],revision:2});
   assert.equal((await h.put(owner,'page.HTML')).result.status,200);
   assert.equal((await h.request('/api/sync/settings',{admin:false})).status,401);
   assert.equal((await h.request('/api/admin/sync-settings',{admin:false,token:device.token})).status,401);
@@ -19,7 +19,7 @@ test('后缀按最后一个点且忽略大小写，单点隐藏文件属于无�
 });
 test('规则正规化与版本持久化，过时设置不能覆盖新设置',async()=>{
   const original=await settings();const result=await update({fileExtensions:['.PY',' TXT ','py'],includeExtensionless:false});
-  assert.deepEqual(result.value,{fileExtensions:['py','txt'],includeExtensionless:false,revision:2});
+  assert.deepEqual(result.value,{fileExtensions:['py','txt'],includeExtensionless:false,excludedDirectories:['_cache','__pycache__','pycache'],revision:3});
   assert.equal((await h.request('/api/admin/sync-settings',{method:'PUT',data:original})).status,409);
   assert.deepEqual(await settings(),result.value);
 });
