@@ -2,7 +2,7 @@
 export const MIGRATION_NAMES=[
   '0001_initial.sql','0002_d1_files.sql','0003_permanent_shares.sql','0004_sync_lookup.sql',
   '0005_sync_settings.sql','0006_device_config.sql','0007_excluded_directories.sql','0008_factory_reset.sql',
-  '0009_generic_sync.sql','0010_publish_checks.sql'
+  '0009_generic_sync.sql','0010_publish_checks.sql','0011_query_indexes.sql'
 ];
 
 export function statements(sql){
@@ -28,7 +28,8 @@ export function repairPlan(migrations,{names,columns,applied,hasSettings}){
       }else if(name==='0007_excluded_directories.sql'){
         if(missingColumn)plan.push(statement);
       }else if(name==='0003_permanent_shares.sql'){
-        if(!applied.has(name))plan.push(statement);
+        // 新建表没有待调整行，跳过空更新，为首次状态请求保留查询额度。
+        if(!applied.has(name)&&names.has('share_tokens'))plan.push(statement);
       }else{
         throw new Error(`Unsupported runtime migration: ${name}`);
       }

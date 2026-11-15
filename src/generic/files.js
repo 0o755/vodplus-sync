@@ -26,17 +26,17 @@ export async function pushFile(env,request,url,device){
   if(!deleting)for(let i=1;i<parts.length;i++)rows.push({id:crypto.randomUUID(),path:parts.slice(0,i).join('/'),kind:'directory',data:'{}'});
   rows.push({id:crypto.randomUUID(),path,kind:'file',data:JSON.stringify({hash,size:content?.length??0})});
   const encoded=JSON.stringify(rows);
-  const wrongKind=await one(env,`SELECT e.path FROM entities e JOIN json_each(?) j ON lower(e.path)=lower(json_extract(j.value,'$.path')) WHERE e.owner=? AND e.deleted=0 AND e.kind<>json_extract(j.value,'$.kind') LIMIT 1`,encoded,owner);
+  const wrongKind=await one(env,`SELECT e.path FROM entities e JOIN json_each(?) j ON lower(e.path)=lower(json_extract(j.value,'$.path')) WHERE e.owner=? AND e.path IS NOT NULL AND e.deleted=0 AND e.kind<>json_extract(j.value,'$.kind') LIMIT 1`,encoded,owner);
   assert(!wrongKind,422,'目标文件或父目录与已有路径类型不一致');
   const condition=`EXISTS(SELECT 1 FROM sync_settings WHERE id=1 AND revision=?)
-    AND NOT EXISTS(SELECT 1 FROM entities e JOIN json_each(?) j ON lower(e.path)=lower(json_extract(j.value,'$.path')) WHERE e.owner=? AND e.deleted=0 AND e.kind<>json_extract(j.value,'$.kind'))
-    AND (SELECT COUNT(*) FROM entities WHERE owner=?)+(SELECT COUNT(*) FROM json_each(?) j WHERE NOT EXISTS(SELECT 1 FROM entities WHERE owner=? AND lower(path)=lower(json_extract(j.value,'$.path'))))<=5000`;
+    AND NOT EXISTS(SELECT 1 FROM entities e JOIN json_each(?) j ON lower(e.path)=lower(json_extract(j.value,'$.path')) WHERE e.owner=? AND e.path IS NOT NULL AND e.deleted=0 AND e.kind<>json_extract(j.value,'$.kind'))
+    AND (SELECT COUNT(*) FROM entities WHERE owner=?)+(SELECT COUNT(*) FROM json_each(?) j WHERE NOT EXISTS(SELECT 1 FROM entities WHERE owner=? AND path IS NOT NULL AND lower(path)=lower(json_extract(j.value,'$.path'))))<=5000`;
   const batch=[receiptStatement(env,device,operation,fingerprint,nonce,result,(deleting?'EXISTS(SELECT 1 FROM sync_settings WHERE id=1 AND revision=?)':condition)+(scope?' AND '+publicationGuard:''),[...(deleting?[policy.revision]:[policy.revision,encoded,owner,owner,encoded,owner]),...(scope?[session,device.id,Date.now()]:[])])];
   if(deleting){
-    batch.push(stmt(env,`UPDATE entities SET deleted=1,version=version+1,source=?,updated=? WHERE owner=? AND lower(path)=lower(?) AND kind='file' AND deleted=0 AND ${receiptGuard}`,`device:${device.id}`,Date.now(),owner,path,...receiptValues(device,operation,nonce)));
+    batch.push(stmt(env,`UPDATE entities SET deleted=1,version=version+1,source=?,updated=? WHERE owner=? AND path IS NOT NULL AND lower(path)=lower(?) AND kind='file' AND deleted=0 AND ${receiptGuard}`,`device:${device.id}`,Date.now(),owner,path,...receiptValues(device,operation,nonce)));
   }else{
     batch.push(stmt(env,`INSERT INTO entities(owner,id,kind,path,version,data,deleted,enabled,source,updated)
-      SELECT ?,COALESCE((SELECT id FROM entities WHERE owner=? AND lower(path)=lower(json_extract(j.value,'$.path')) ORDER BY deleted,updated DESC LIMIT 1),json_extract(j.value,'$.id')),
+      SELECT ?,COALESCE((SELECT id FROM entities WHERE owner=? AND path IS NOT NULL AND lower(path)=lower(json_extract(j.value,'$.path')) ORDER BY deleted,updated DESC LIMIT 1),json_extract(j.value,'$.id')),
       json_extract(j.value,'$.kind'),json_extract(j.value,'$.path'),1,json_extract(j.value,'$.data'),0,1,?,?
       FROM json_each(?) j WHERE ${receiptGuard}
       ON CONFLICT(owner,id) DO UPDATE SET kind=excluded.kind,path=excluded.path,version=entities.version+1,data=excluded.data,deleted=0,enabled=1,source=excluded.source,updated=excluded.updated

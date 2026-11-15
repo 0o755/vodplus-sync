@@ -7,22 +7,35 @@ const required=[
  ['maintenance_actions','0008_factory_reset.sql'],
  ['restore_sessions','0009_generic_sync.sql'],['restore_snapshots','0009_generic_sync.sql'],
  ['restore_items','0009_generic_sync.sql'],['restore_baselines','0009_generic_sync.sql'],['restore_known','0009_generic_sync.sql'],
- ['publish_sessions','0009_generic_sync.sql'],['publish_items','0009_generic_sync.sql'],['publish_checks','0010_publish_checks.sql'],['device_contents','0010_publish_checks.sql']
+ ['publish_sessions','0009_generic_sync.sql'],['publish_items','0009_generic_sync.sql'],['publish_checks','0010_publish_checks.sql'],['device_contents','0010_publish_checks.sql'],
+ ['entity_record_lookup','0011_query_indexes.sql'],['entity_path_lookup','0011_query_indexes.sql'],['entity_disabled_directories','0011_query_indexes.sql']
 ];
 export async function health(env){
   try{
-    const results=await env.DB.batch([env.DB.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','trigger')"),env.DB.prepare('PRAGMA table_info(sync_settings)')]);
+    const results=await env.DB.batch([env.DB.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','trigger','index')"),env.DB.prepare('PRAGMA table_info(sync_settings)')]);
     const names=new Set(results[0].results.map(row=>row.name));const missing=new Set(required.filter(([name])=>!names.has(name)).map(([,migration])=>migration));
     if(!results[1].results.some(row=>row.name==='excluded_directories'))missing.add('0007_excluded_directories.sql');
     if(!names.has('factory_reset'))missing.add('0008_factory_reset.sql');
     if(!names.has('reset_generic_sync'))missing.add('0009_generic_sync.sql');
     if(!names.has('reset_publish_checks'))missing.add('0010_publish_checks.sql');
-    return json({ok:missing.size===0,requiredSchema:10,syncApi:2,capabilities:['push-check','device-held-content'],automaticMigration:true,code:missing.size?'SCHEMA_NOT_READY':'OK',missingMigrations:[...missing]},missing.size?503:200);
-  }catch{return json({ok:false,requiredSchema:10,code:'DATABASE_UNAVAILABLE'},503);}
+    return json({ok:missing.size===0,requiredSchema:11,syncApi:2,capabilities:['push-check','device-held-content'],automaticMigration:true,code:missing.size?'SCHEMA_NOT_READY':'OK',missingMigrations:[...missing]},missing.size?503:200);
+  }catch(error){const detail=failureDetail(error);return json({ok:false,requiredSchema:11,...(detail.code==='DATABASE_LIMIT'?detail:{code:'DATABASE_UNAVAILABLE'})},503);}
 }
 export function failureCode(error){
-  const message=String(error?.message||error);
+  const message=errorText(error);
   if(/no such (table|column)|has no column named/i.test(message))return 'SCHEMA_NOT_READY';
-  if(/D1.*(limit|quota)|exceeded.*(read|write|storage)|database.*(full|size limit)/i.test(message))return 'DATABASE_LIMIT';
+  if(/D1.*(limit|quota)|exceeded.*(read|write|storage)|database.*(full|size limit)|too many (?:D1 |API )?(?:queries|requests)/i.test(message))return 'DATABASE_LIMIT';
   return 'INTERNAL_ERROR';
+}
+function errorText(error){return [error?.message||error,error?.cause?.message].filter(Boolean).join(' ');}
+export function failureDetail(error){
+  const code=failureCode(error);if(code!=='DATABASE_LIMIT')return {code};
+  const message=errorText(error);
+  const limitType=/storage|database.*(?:full|size)|disk.*full/i.test(message)?'storage':/\bread|reading|rows_read/i.test(message)?'read':/written|write|writing/i.test(message)?'write':/queries|requests|subrequest/i.test(message)?'queries':'unknown';
+  return {code,limitType};
+}
+export function failureMessage(detail){
+  if(detail.code==='SCHEMA_NOT_READY')return '服务数据准备失败，请稍后重试';
+  if(detail.code!=='DATABASE_LIMIT')return '服务暂时不可用';
+  return {read:'数据库今日读取额度已用完，免费额度在北京时间 08:00 重置',write:'数据库今日写入额度已用完，免费额度在北京时间 08:00 重置',storage:'数据库存储容量已达上限',queries:'单次请求的数据库查询次数已达上限',unknown:'数据库额度或容量已达限制'}[detail.limitType];
 }

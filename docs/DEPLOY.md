@@ -46,7 +46,7 @@
 ```json
 {
   "ok": true,
-  "requiredSchema": 10,
+  "requiredSchema": 11,
   "syncApi": 2,
   "capabilities": ["push-check","device-held-content"],
   "automaticMigration": true,
@@ -97,6 +97,10 @@ Cloudflare D1 免费计划的主要额度：
 项目单文件限制为 1.5 MiB。文件以 Base64 分块保存，编码约增加三分之一体积；历史内容、索引和恢复快照也占用空间。完整恢复会写入服务端快照，应结合数据规模和操作频率关注用量。
 
 免费计划超过每日读写额度时，数据库查询会失败，需等待额度恢复或调整套餐。
+
+每日额度在 UTC 00:00（北京时间 08:00）重置。读取额度按 SQL 实际读取的行计算，不是请求次数；查询返回少量结果，也可能扫描大量行。
+
+`DATABASE_LIMIT` 可附带 `limitType`：`read` 为读取额度、`write` 为写入额度、`storage` 为容量、`queries` 为单次请求查询次数。每日读取额度不足不代表存储空间已满。
 
 ## 常见问题
 

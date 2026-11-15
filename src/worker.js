@@ -7,7 +7,7 @@ import { manageShare, shareRoute } from './shares.js';
 import { maintenance } from './maintenance.js';
 import {adminDeviceConfigRoute,syncDeviceConfigRoute} from './devices/routes.js';
 import {accountRoute} from './account.js';
-import {health,failureCode} from './diagnostics.js';
+import {health,failureDetail,failureMessage} from './diagnostics.js';
 import {ensureSchema} from './schema/ensure.js';
 import {genericRoute} from './generic/routes.js';
 
@@ -36,12 +36,12 @@ export default {
     } catch (error) {
       const status = error instanceof Fault ? error.status : 500;
       if(status===500){
-        const code=failureCode(error);const requestId=crypto.randomUUID();
+        const detail=failureDetail(error);const requestId=crypto.randomUUID();
         // 不记录完整 URL、SQL、错误正文和头部，避免凭证进入日志。
         const path=new URL(request.url).pathname;
         const operation=path.startsWith('/api/sync/')||path.startsWith('/api/v2/sync/')?'sync':path.startsWith('/api/admin/')?'admin':path.startsWith('/share/')?'share':'other';
-        console.error(JSON.stringify({event:'request_failed',requestId,operation,code}));
-        return secure(json({error:code==='SCHEMA_NOT_READY'?'服务数据准备失败，请稍后重试':code==='DATABASE_LIMIT'?'数据库额度或容量已达限制':'服务暂时不可用',detail:{code,requestId}},500));
+        console.error(JSON.stringify({event:'request_failed',requestId,operation,...detail}));
+        return secure(json({error:failureMessage(detail),detail:{...detail,requestId}},500));
       }
       return secure(json({ error: status === 500 ? '服务暂时不可用，请检查数据库迁移和资源绑定' : error.message, detail: error.detail }, status, status === 503 && error.detail?.retryable ? { 'retry-after': '1' } : {}));
     }

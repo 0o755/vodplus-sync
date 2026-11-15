@@ -72,7 +72,7 @@ export async function restore(env,device,input){
     const result=await env.DB.batch([
       stmt(env,`UPDATE restore_sessions SET acknowledged=1 WHERE token=? AND seq=(SELECT MAX(seq) FROM restore_sessions WHERE device=? AND scope_hash=?)`,row.token,device.id,row.scope_hash),
       stmt(env,`UPDATE restore_baselines SET session=?,seq=?,dirty=0 WHERE device=? AND scope_hash=? AND ${guard}`,row.token,row.seq,device.id,row.scope_hash,row.token),
-      stmt(env,`DELETE FROM restore_known WHERE device=? AND scope_hash=? AND ${guard}`,device.id,row.scope_hash,row.token),
+      stmt(env,`DELETE FROM restore_known WHERE device=? AND scope_hash=? AND NOT EXISTS(SELECT 1 FROM restore_snapshots n WHERE n.session=? AND n.identity=restore_known.identity) AND ${guard}`,device.id,row.scope_hash,row.token,row.token),
       stmt(env,`INSERT OR IGNORE INTO restore_known(device,scope_hash,identity,type,namespace,key,path) SELECT ?,?,identity,type,namespace,key,path FROM restore_snapshots WHERE session=? AND ${guard}`,device.id,row.scope_hash,row.token,row.token),
       stmt(env,`UPDATE devices SET status='下载成功' WHERE id=? AND ${guard}`,device.id,row.token),
       rememberRestored(env,device,row)

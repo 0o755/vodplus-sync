@@ -74,6 +74,8 @@ Content-Type: application/json
 
 `error` 为错误说明；`detail` 为可选诊断信息。具体诊断字段以响应为准。
 
+数据库限制使用 `detail.code=DATABASE_LIMIT`，可附 `detail.limitType=read|write|storage|queries|unknown`，分别表示读取、写入、容量、单次查询次数和未明确的限制。
+
 | 状态码 | 含义 |
 | --- | --- |
 | 400 | 参数、JSON 或路径无效 |
@@ -98,7 +100,7 @@ Content-Type: application/json
 ```json
 {
   "ok": true,
-  "requiredSchema": 10,
+  "requiredSchema": 11,
   "syncApi": 2,
   "capabilities": ["push-check","device-held-content"],
   "automaticMigration": true,
