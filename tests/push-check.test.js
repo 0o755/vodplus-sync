@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHarness} from './harness.js';
 import {SyncClient} from '../examples/sync-v2-client.js';
-import {valueDigest,bytesDigest,canonicalValue} from '../src/lib/content-digest.js';
+import {valueDigest,bytesDigest,canonicalValue,valueFingerprint,bytesFingerprint} from '../src/lib/content-digest.js';
 import {publication} from '../src/generic/publication.js';
 const uuid=()=>crypto.randomUUID();
 const scope={namespaces:['app.notes'],files:true};
@@ -27,6 +27,8 @@ test('跨语言摘要固定向量、键顺序、零和转义保持稳定',async(
   assert.equal(await valueDigest(-0),await valueDigest(0));assert.notEqual(await valueDigest('1'),await valueDigest(1));
   assert.equal(canonicalValue(1.5),'d3ff8000000000000');assert.equal(await valueDigest(JSON.parse('"\\u4f60"')),await valueDigest('你'));
   assert.throws(()=>canonicalValue('\ud800'),/Unicode/);assert.throws(()=>canonicalValue(Infinity),/有限值/);
+  assert.equal(await valueFingerprint('Hello'),'3698dca7681f48f88f5ad97df04ad2ba');
+  assert.equal(await bytesFingerprint(encode('Hello')),'185f8db32271fe25f561a6fc938b2e26');
 });
 
 test('一致数据与文件直接计入清单，无内容更新且不会被 finish 删除',async()=>{
@@ -38,7 +40,7 @@ test('一致数据与文件直接计入清单，无内容更新且不会被 fini
     assert.equal((await h.post({action:'check',session,items})).value.items[0].status,'unchanged');
     assert.equal((await h.post({action:'finish',session})).value.ok,true);
     assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM changes WHERE owner=?').bind(h.owner).first()).n,before);
-    assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM entities WHERE owner=? AND deleted=0').bind(h.owner).first()).n,2);
+    assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM entities WHERE owner=? AND deleted=0').bind(h.owner).first()).n,1);assert.equal((await h.files(h.owner)).length,1);
   }finally{await h.dispose();}
 });
 
@@ -48,10 +50,10 @@ test('需要上传时不提前删除缺失项目，数据和文件上传后才�
     const items=[await h.dataItem('new',null),await h.fileItem('new.py','new')];
     assert.deepEqual((await h.post({action:'check',session,items})).value.items.map(i=>i.status),['upload','upload']);
     const pending=await h.post({action:'finish',session});assert.equal(pending.value.ok,false);assert.equal(pending.value.upload.length,2);
-    assert.equal((await h.db.prepare("SELECT deleted FROM entities WHERE owner=? AND path='removed.py'").bind(h.owner).first()).deleted,0);
+    assert.equal((await h.lookupFile(h.owner,'removed.py')).deleted,0);
     await h.push('new',null,session);await h.file('new.py','new',session);
     assert.equal((await h.post({action:'finish',session})).value.ok,true);
-    assert.equal((await h.db.prepare("SELECT deleted FROM entities WHERE owner=? AND path='removed.py'").bind(h.owner).first()).deleted,1);
+    assert.equal((await h.lookupFile(h.owner,'removed.py')).deleted,1);
   }finally{await h.dispose();}
 });
 
@@ -61,7 +63,7 @@ test('比对后云端发生变化，确认返回补传清单并保留待删除�
     await h.post({action:'check',session,items:[await h.dataItem('same','local')]});
     await h.push('same','other device');
     const result=await h.post({action:'finish',session});assert.equal(result.value.ok,false);assert.deepEqual(result.value.upload,[{type:'data',namespace:'app.notes',key:'same'}]);
-    assert.equal((await h.db.prepare("SELECT deleted FROM entities WHERE owner=? AND path='removed.py'").bind(h.owner).first()).deleted,0);
+    assert.equal((await h.lookupFile(h.owner,'removed.py')).deleted,0);
     await h.push('same','local',session);assert.equal((await h.post({action:'finish',session})).value.ok,true);
   }finally{await h.dispose();}
 });

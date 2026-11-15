@@ -4,7 +4,7 @@ import { digest, password, token, verify } from './lib/crypto.js';
 import { all, one, run } from './lib/db.js';
 import { throttle } from './auth.js';
 import { ownerExists } from './admin.js';
-import { entities } from './sync/store.js';
+import {fileRows,fileRow} from './storage/catalog.js';
 import { getContent } from './storage/content.js';
 
 async function issue(env, share, base) {
@@ -22,7 +22,7 @@ export async function manageShare(env, request, url) {
     const input = await body(request); await ownerExists(env, input.owner);
     input.password ??= ''; validPassword(input.password);
     const root = input.root ? relativePath(input.root) : '';
-    const directory = root ? (await entities(env, input.owner)).find(r => r.path === root && r.kind === 'directory' && !r.deleted) : null;
+    const directory = root ? (await fileRows(env, input.owner)).find(r => r.path === root && r.kind === 'directory' && !r.deleted) : null;
     if (root) assert(directory, 400, '发布目录不存在');
     const shareId = crypto.randomUUID();
     await run(env, 'INSERT INTO shares(id,name,owner,root,root_id,password,created) VALUES(?,?,?,?,?,?,?)', shareId, name(input.name), input.owner, root, directory?.id || null, input.password ? await password(input.password) : '', Date.now());
@@ -52,7 +52,7 @@ export async function shareRoute(env, request, url) {
   const share = await one(env, 'SELECT * FROM shares WHERE id=? AND enabled=1', match[1]); assert(share, 404, '分享不存在或已停用');
   if (share.owner !== 'public') assert(await one(env, 'SELECT id FROM users WHERE id=? AND enabled=1', share.owner), 404, '分享已停用');
   if (share.root_id) {
-    const directory = await one(env, 'SELECT path,deleted,enabled FROM entities WHERE owner=? AND id=?', share.owner, share.root_id);
+    const directory = await fileRow(env,share.owner,share.root_id);
     assert(directory && !directory.deleted && directory.enabled, 404, '发布目录已删除或停用');
     share.root = directory.path;
   }
@@ -65,7 +65,7 @@ export async function shareRoute(env, request, url) {
   assert(request.method === 'GET', 405, '分享只允许读取');
   const raw = url.searchParams.get('token') || request.headers.get('authorization')?.replace(/^Bearer /, '');
   if (share.password) assert(raw && await one(env, 'SELECT hash FROM share_tokens WHERE hash=? AND share_id=? AND (expires=0 OR expires>?)', await digest(raw), share.id, Date.now()), 401, '需要分享密码授权', { authUrl: `/share/${share.id}/auth` });
-  const rows = publicFiles(await entities(env, share.owner), share.root);
+  const rows = publicFiles(await fileRows(env, share.owner), share.root);
   const link = suffix => `${url.origin}/share/${share.id}/${suffix}${share.password ? `?token=${encodeURIComponent(raw)}` : ''}`;
   const fileUrl = file => link(`files/${file.id}/${encodeURIComponent(file.path.split('/').pop())}`);
   const scripts = rows.filter(r => /\.(py|js|php)$/i.test(r.path) && !/(^|\/)直播配置\//.test(r.path));

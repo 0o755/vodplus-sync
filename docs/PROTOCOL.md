@@ -100,9 +100,9 @@ Content-Type: application/json
 ```json
 {
   "ok": true,
-  "requiredSchema": 12,
+  "requiredSchema": 13,
   "syncApi": 2,
-  "capabilities": ["push-check","device-held-content","compact-sync-state"],
+  "capabilities": ["push-check","device-held-content","compact-sync-state","json-file-catalog","blob-files","fingerprint-128"],
   "automaticMigration": true,
   "code": "OK",
   "missingMigrations": []

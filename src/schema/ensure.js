@@ -11,9 +11,10 @@ import generic from '../../migrations/0009_generic_sync.sql';
 import checks from '../../migrations/0010_publish_checks.sql';
 import indexes from '../../migrations/0011_query_indexes.sql';
 import summaries from '../../migrations/0012_sync_summaries.sql';
+import compactFiles from '../../migrations/0013_compact_file_storage.sql';
 import {MIGRATION_NAMES,repairPlan} from './plan.js';
 
-const migrations=[initial,files,shares,lookup,settings,devices,excluded,reset,generic,checks,indexes,summaries].map((sql,index)=>({name:MIGRATION_NAMES[index],sql}));
+const migrations=[initial,files,shares,lookup,settings,devices,excluded,reset,generic,checks,indexes,summaries,compactFiles].map((sql,index)=>({name:MIGRATION_NAMES[index],sql}));
 const readiness=new WeakMap();
 
 async function inspect(db){
@@ -25,18 +26,18 @@ async function inspect(db){
   const columns=new Set(results[1].results.map(row=>row.name));
   const applied=names.has('d1_migrations')?new Set((await db.prepare('SELECT name FROM d1_migrations').all()).results.map(row=>row.name)):new Set();
   const hasSettings=names.has('sync_settings')&&!!await db.prepare('SELECT id FROM sync_settings WHERE id=1').first();
-  return {names,columns,applied,hasSettings};
+  const storageVersion=names.has('storage_format')?(await db.prepare('SELECT version FROM storage_format WHERE id=1').first())?.version:0;
+  return {names,columns,applied,hasSettings,storageVersion};
 }
 
 async function repair(db){
   for(let attempt=0;attempt<3;attempt++){
     const state=await inspect(db);const plan=repairPlan(migrations,state);
     if(!plan.length)return true;
-    // 空库先完成账号/状态所需结构，下一次 API 补齐其余模块，避免单请求超过免费查询次数。
-    const bootstrap=!state.names.has('administrators')&&plan.length>40;
     try{
       // DDL、默认行及迁移记录一起提交，失败时整体回滚，不留下半升级结构。
-      await db.batch((bootstrap?plan.slice(0,40):plan).map(sql=>db.prepare(sql)));return !bootstrap;
+      // D1 batch 作为一次调用执行；清空、重建和迁移记录必须一起提交。
+      await db.batch(plan.map(sql=>db.prepare(sql)));return true;
     }catch(error){
       // 不同 Worker 实例可能同时补列；另一实例已完成时重新检查即可。
       if(attempt===2||!/duplicate column name|already exists/i.test(String(error?.message)))throw error;

@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { FILE_ICON_ASSETS } from '../web/lib/file-types.js';
 import {MIGRATION_NAMES,statements} from '../src/schema/plan.js';
+import {Catalog,readCatalog,fileRows} from '../src/storage/catalog.js';
+import {fileDeviceState} from '../src/storage/file-sync.js';
 export const digest=value=>createHash('sha256').update(value).digest('hex');
 export async function createHarness({assets=false,setup=true,migrations=MIGRATION_NAMES.length}={}){
   const bundle=await build({entryPoints:['src/worker.js'],bundle:true,write:false,format:'esm',platform:'browser',loader:{'.sql':'text'}});
@@ -24,6 +26,10 @@ export async function createHarness({assets=false,setup=true,migrations=MIGRATIO
     const sql=await readFile(new URL('../migrations/'+name,import.meta.url),'utf8');
     for(const statement of statements(sql))await db.prepare(statement).run();
   }
+  if(migrations>0){
+    await db.prepare('CREATE TABLE IF NOT EXISTS d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE,applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)').run();
+    await db.batch(MIGRATION_NAMES.slice(0,migrations).map(name=>db.prepare('INSERT OR IGNORE INTO d1_migrations(name) VALUES(?)').bind(name)));
+  }
   let cookie='';
   const request=async(path,{method='GET',data,token,admin=true,raw,headers={}}={})=>{
     const response=await mf.dispatchFetch('http://localhost'+path,{method,headers:{...(admin&&cookie?{cookie}:{}),...(token?{authorization:`Bearer ${token}`} : {}),...(data?{'content-type':'application/json'}:{}),...headers},body:data?JSON.stringify(data):raw});
@@ -41,6 +47,7 @@ export async function createHarness({assets=false,setup=true,migrations=MIGRATIO
     const patch={id:crypto.randomUUID(),kind:'file',path,baseVersion:0,data:{hash,size:Buffer.byteLength(text)},...extra};
     return {patch,result:await request(`/api/admin/spaces/${owner}/commit`,{method:'POST',data:{opId:crypto.randomUUID(),patch}})};
   };
-  return {mf,db,request,createUser,bind,put,dispose:()=>mf.dispose()};
+  const file=async(owner,path)=>{const model=new Catalog((await readCatalog({DB:db},owner)).value);const item=model.byPath(path)||model.byPath(path,true);return item?model.row(item):null;};
+  return {mf,db,request,createUser,bind,put,file,lookupFile:file,files:owner=>fileRows({DB:db},owner),fileState:async device=>(await fileDeviceState({DB:db},device)).value,dispose:()=>mf.dispose()};
   }catch(error){await mf.dispose();throw error;}
 }

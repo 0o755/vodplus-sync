@@ -32,7 +32,7 @@ test('清单确认与排除规则并发变化时重读规则，不误删刚排�
       return h.db.batch(statements);
     }};
     const response=await publication({DB:db},{id:h.a.deviceId,user_id:h.owner},{action:'finish',session});
-    assert.equal(response.status,200);assert.equal((await h.db.prepare("SELECT deleted FROM entities WHERE owner=? AND path='cache/a.py'").bind(h.owner).first()).deleted,0);
+    assert.equal(response.status,200);assert.equal((await h.lookupFile(h.owner,'cache/a.py')).deleted,0);
   }finally{await h.dispose();}
 });
 
@@ -101,10 +101,10 @@ test('完整发布只在 finish 后删除缺失项，保留扩展分区和排除
     const session=pub.value.session;
     assert.equal((await h.push('example.notes',[{key:'keep',value:9}],{session})).status,200);
     assert.equal((await h.file('a.py','A',{'x-sync-session':session})).status,200);
-    assert.equal((await h.db.prepare("SELECT deleted FROM entities WHERE owner=? AND path='b.py'").bind(h.owner).first()).deleted,0);
+    assert.equal((await h.lookupFile(h.owner,'b.py')).deleted,0);
     assert.equal((await h.post('push',{action:'finish',session})).status,200);assert.equal((await h.post('push',{action:'finish',session})).status,200);
-    assert.equal((await h.db.prepare("SELECT deleted FROM entities WHERE owner=? AND path='b.py'").bind(h.owner).first()).deleted,1);
-    assert.equal((await h.db.prepare("SELECT deleted FROM entities WHERE owner=? AND path='cache/c.py'").bind(h.owner).first()).deleted,0);
+    assert.equal((await h.lookupFile(h.owner,'b.py')).deleted,1);
+    assert.equal((await h.lookupFile(h.owner,'cache/c.py')).deleted,0);
     const s=(await h.start(scope)).value;const items=await h.pages(s);assert.ok(items.some(i=>i.key==='other'));assert.ok(!items.some(i=>i.key==='remove'));
   }finally{await h.dispose();}
 });

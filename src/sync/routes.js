@@ -5,6 +5,7 @@ import { all, one, run, event } from '../lib/db.js';
 import { commit, cursor } from './store.js';
 import { putContent, getContent } from '../storage/content.js';
 import { syncSettings, assertFileAllowed } from './settings.js';
+import {fileRow} from '../storage/catalog.js';
 
 export async function upload(env, request, owner, hash) {
   assert(/^[a-f0-9]{64}$/.test(hash), 400, '摘要无效');
@@ -17,8 +18,8 @@ export async function upload(env, request, owner, hash) {
 }
 export async function download(env, owner, entityId, version) {
   if (version) assert(Number.isSafeInteger(Number(version)) && Number(version) > 0, 400, '版本号无效');
-  const row = version ? await one(env, 'SELECT snapshot FROM changes WHERE owner=? AND entity_id=? AND version=? LIMIT 1', owner, entityId, Number(version)) : await one(env, 'SELECT data,kind FROM entities WHERE owner=? AND id=?', owner, entityId);
-  const value = row?.snapshot ? JSON.parse(row.snapshot) : row && { ...row, data: JSON.parse(row.data) };
+  const row = version ? await one(env, 'SELECT snapshot FROM changes WHERE owner=? AND entity_id=? AND version=? LIMIT 1', owner, entityId, Number(version)) : await fileRow(env,owner,entityId);
+  const value = row?.snapshot ? JSON.parse(row.snapshot) : row;
   assert(value?.kind === 'file', 404, '文件版本不存在');
   const object = await getContent(env, owner, value.data.hash); assert(object, 404, '文件内容不存在');
   return new Response(object.body, { headers: { 'content-type': 'application/octet-stream', 'x-content-sha256': value.data.hash } });

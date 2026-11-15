@@ -2,10 +2,17 @@
 import { assert, body, id, json, name } from './lib/http.js';
 import { digest, token } from './lib/crypto.js';
 import { all, one, run, event } from './lib/db.js';
-import { entities, commit } from './sync/store.js';
+import { entities, commit,recordRows } from './sync/store.js';
 import { download, upload } from './sync/routes.js';
 import { copyContent, getContent } from './storage/content.js';
 import { syncSettings, updateSyncSettings } from './sync/settings.js';
+import {fileRows,Catalog,readCatalog} from './storage/catalog.js';
+
+async function shareOverview(env){
+  const shares=await all(env,"SELECT id,name,owner,root,root_id,enabled,created,CASE WHEN password='' THEN 0 ELSE 1 END password_required FROM shares ORDER BY created DESC");const catalogs=new Map();
+  for(const share of shares){if(!share.root_id)continue;if(!catalogs.has(share.owner))catalogs.set(share.owner,new Catalog((await readCatalog(env,share.owner)).value));const model=catalogs.get(share.owner),item=model.byId(share.root_id);if(item)share.root=model.path(item);}
+  return shares;
+}
 
 export async function ownerExists(env, owner) { assert(owner === 'public' || await one(env, 'SELECT id FROM users WHERE id=?', owner), 404, '人物不存在'); return owner; }
 export async function adminRoute(env, request, url) {
@@ -16,7 +23,7 @@ export async function adminRoute(env, request, url) {
     users: await all(env, 'SELECT * FROM users ORDER BY created'),
     devices: await all(env, 'SELECT d.id,d.user_id,d.name,d.revoked,d.last_seen,d.cursor,d.status,u.name user_name FROM devices d JOIN users u ON d.user_id=u.id ORDER BY last_seen DESC'),
     events: await all(env, 'SELECT e.*,u.name user_name,d.name device_name FROM events e LEFT JOIN users u ON e.owner=u.id LEFT JOIN devices d ON e.device=d.id ORDER BY e.id DESC LIMIT 60'),
-    shares: await all(env, 'SELECT s.id,s.name,s.owner,COALESCE(e.path,s.root) root,s.enabled,s.created,CASE WHEN s.password=\'\' THEN 0 ELSE 1 END password_required FROM shares s LEFT JOIN entities e ON e.owner=s.owner AND e.id=s.root_id ORDER BY s.created DESC'),
+    shares: await shareOverview(env),
     conflicts: await one(env, 'SELECT COUNT(*) total FROM conflicts WHERE resolved=0'), serverTime: Date.now()
   });
   if (path === '/api/admin/copy' && method === 'POST') {
@@ -62,7 +69,7 @@ export async function adminRoute(env, request, url) {
   const ownerMatch = path.match(/^\/api\/admin\/spaces\/([^/]+)\/(entities|commit|conflicts|conflict-file\/[^/]+|blobs\/[^/]+|files\/[^/]+|versions\/[^/]+|resolve\/[^/]+)$/);
   if (ownerMatch) {
     const owner = await ownerExists(env, ownerMatch[1]); const action = ownerMatch[2];
-    if (action === 'entities' && method === 'GET') return json({ items: await entities(env, owner) });
+    if (action === 'entities' && method === 'GET') return json({ items: url.searchParams.get('kind')==='files'?await fileRows(env,owner):url.searchParams.get('kind')==='records'?await recordRows(env,owner):await entities(env, owner) });
     if (action === 'commit' && method === 'POST') {
       const result = await commit(env, owner, `admin:${owner}`, await body(request));
       await event(env, owner, null, '后台编辑', `${result.items.length} 项`); return json(result);

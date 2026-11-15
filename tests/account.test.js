@@ -29,7 +29,7 @@ test('重置清空全部业务数据、失效设备凭证并重新开放管理�
     await h.request('/api/admin/shares',{method:'POST',data:{name:'分享',owner,root:'',password:''}});
     await h.request('/api/sync/device-config',{token:device.token});
     const result=await h.request('/api/admin/account/reset',{method:'POST',data:{currentPassword:oldPassword,confirmation:'RESET'}});assert.equal(result.status,200);assert.equal(result.value.initialized,false);
-    for(const table of ['administrators','users','devices','bindings','device_config','entities','versions','changes','conflicts','receipts','file_contents','file_chunks','shares','share_tokens','sessions','events','rate_limits','maintenance_actions'])assert.equal((await h.db.prepare(`SELECT COUNT(*) n FROM ${table}`).first()).n,0,table);
+    for(const table of ['administrators','users','devices','bindings','device_config','entities','versions','changes','conflicts','receipts','file_contents','json_documents','shares','share_tokens','sessions','events','rate_limits','maintenance_actions'])assert.equal((await h.db.prepare(`SELECT COUNT(*) n FROM ${table}`).first()).n,0,table);
     assert.equal((await h.request('/api/status')).value.initialized,false);assert.equal((await h.request('/api/sync/settings',{token:device.token})).status,401);
     const settings=await h.db.prepare('SELECT * FROM sync_settings').first();assert.deepEqual(JSON.parse(settings.excluded_directories),['_cache','__pycache__','pycache']);
     assert.equal((await h.request('/api/setup',{method:'POST',data:{username:'new-admin',password:'12345'}})).status,200);

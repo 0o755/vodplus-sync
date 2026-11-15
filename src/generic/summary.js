@@ -7,21 +7,29 @@ export const headsSql="COALESCE((SELECT state FROM sync_heads WHERE owner=?),'{\
 export const latestRestoreSql=`MAX(
   COALESCE((SELECT MAX(s.seq) FROM restore_sessions s WHERE s.device=restore_sessions.device AND s.scope_hash=restore_sessions.scope_hash AND s.acknowledged=0),0),
   COALESCE((SELECT MAX(s.seq) FROM restore_sessions s WHERE s.device=restore_sessions.device AND s.scope_hash=restore_sessions.scope_hash AND s.acknowledged=1),0))`;
+export function invalidateOverlappingBaselines(env,device,scopeHash,scope,guard,values){
+  return stmt(env,`DELETE FROM restore_baselines AS b WHERE b.device=? AND b.scope_hash<>? AND b.dirty=0 AND EXISTS(
+    SELECT 1 FROM restore_sessions s WHERE s.token=b.session AND (
+      EXISTS(SELECT 1 FROM json_each(s.scope,'$.namespaces') n WHERE n.value IN(SELECT value FROM json_each(?,'$.namespaces')))
+      OR (json_extract(s.scope,'$.files')=1 AND json_extract(?,'$.files')=1 AND EXISTS(
+        SELECT 1 FROM json_each(s.scope,'$.roots') a JOIN json_each(?,'$.roots') z ON a.value='' OR z.value='' OR a.value=z.value OR substr(a.value,1,length(z.value)+1)=z.value||'/' OR substr(z.value,1,length(a.value)+1)=a.value||'/'))))
+    AND ${guard}`,device.id,scopeHash,scope,scope,scope,...values);
+}
 const parse=text=>{try{return JSON.parse(text);}catch{return null;}};
 const unchanged=(saved,current,scope)=>saved&&(!scope.files||(saved.files??0)===(current.files??0))&&scope.namespaces.every(name=>(saved.data?.[name]??0)===(current.data?.[name]??0));
 function covers(saved,scope){return saved&&scope.namespaces.every(name=>saved.namespaces.includes(name))&&(!scope.files||(saved.files&&scope.roots.every(root=>saved.roots.some(parent=>!parent||root===parent||root.startsWith(parent+'/')))));}
 
-export function rememberPushSummary(env,device,row,policyRevision){
+export function rememberPushSummary(env,device,row,policyRevision,allowed=true){
   return stmt(env,`INSERT INTO device_sync_summaries(device,state)
     SELECT ?,json_object('scope',json(?),'heads',json(${headsSql}),'policyRevision',?)
-    WHERE EXISTS(SELECT 1 FROM publish_sessions WHERE token=? AND finished=2)
+    WHERE ? AND EXISTS(SELECT 1 FROM publish_sessions WHERE token=? AND finished=2)
       AND NOT EXISTS(SELECT 1 FROM publish_items p WHERE p.session=? AND NOT EXISTS(SELECT 1 FROM publish_checks c WHERE c.session=p.session AND c.identity=p.identity))
-    ON CONFLICT(device) DO UPDATE SET state=excluded.state WHERE device_sync_summaries.state<>excluded.state`,device.id,row.scope,device.user_id,policyRevision,row.token,row.token);
+    ON CONFLICT(device) DO UPDATE SET state=excluded.state WHERE device_sync_summaries.state<>excluded.state`,device.id,row.scope,device.user_id,policyRevision,allowed?1:0,row.token,row.token);
 }
 export function rememberRestoreSummary(env,device,row){
   return stmt(env,`INSERT INTO device_sync_summaries(device,state)
     SELECT ?,json_object('scope',json_remove(scope,'$._heads'),'heads',json_extract(scope,'$._heads'),'policyRevision',json_extract(policy,'$.revision'))
-    FROM restore_sessions WHERE token=? AND acknowledged=1 AND json_type(scope,'$._heads')='object'
+    FROM restore_sessions WHERE token=? AND acknowledged=2 AND json_type(scope,'$._heads')='object'
     ON CONFLICT(device) DO UPDATE SET state=excluded.state WHERE device_sync_summaries.state<>excluded.state`,device.id,row.token);
 }
 

@@ -54,6 +54,8 @@ Authorization: Bearer <device-token>
 
 finish 返回 ok=false 时，按 upload 列表补传后再次确认。任意读取或上传失败时，不将任务标记为完成。摘要函数与校验向量见 [内容摘要](CONTENT_DIGEST.md)。
 
+指纹使用 SHA-256 前 128 bit，输出 32 个小写十六进制字符。文件按原始字节计算，JSON 仅对 value 按规定编码计算。SDK 已封装 `bytesFingerprint` 和 `valueFingerprint`。
+
 finish 成功后，持久保存此次推送对应的本地数据缓存。服务端会记录设备已持有的具体项目；后续增量恢复可能省略这些内容，即使恢复 scope 与推送 scope 不同。
 
 文件规则排除项可以跳过。文件上传返回 `skipped: true` 时，将其显示为已跳过，不计为传输失败。

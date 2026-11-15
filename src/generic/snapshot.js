@@ -20,12 +20,8 @@ export function snapshotStatements(env,device,session,scope,policy){
   return [
     stmt(env,`INSERT INTO restore_snapshots(session,identity,type,namespace,key,value,version)
       SELECT ?,json_array('data',${ns},${key}),'data',${ns},${key},${value},e.version FROM entities e
-      WHERE e.owner=? AND e.path IS NULL AND e.deleted=0 AND e.enabled=1 AND ${ns} IN (SELECT value FROM json_each(?,'$.namespaces'))`,session,owner,scope),
-    stmt(env,`INSERT INTO restore_snapshots(session,identity,type,path,hash,size,version)
-      SELECT ?,json_array('file',e.path),'file',e.path,json_extract(e.data,'$.hash'),json_extract(e.data,'$.size'),e.version FROM entities e
-      WHERE e.owner=? AND e.kind='file' AND e.deleted=0 AND e.enabled=1 AND json_extract(?,'$.files')=1
-      AND NOT EXISTS(SELECT 1 FROM entities parent WHERE parent.owner=e.owner AND parent.kind='directory' AND parent.deleted=0 AND parent.enabled=0 AND substr(e.path,1,length(parent.path)+1)=parent.path||'/')
-      AND ${allowedFile('e.path')}`,session,owner,scope,...policyValues(scope,policy))
+      WHERE e.owner=? AND e.path IS NULL AND e.deleted=0 AND e.enabled=1 AND ${ns} IN (SELECT value FROM json_each(?,'$.namespaces'))
+      AND EXISTS(SELECT 1 FROM restore_sessions WHERE token=?)`,session,owner,scope,session)
   ];
 }
 
@@ -41,6 +37,6 @@ export function differenceStatement(env,device,session,scopeHash,scope,policy){
       UNION ALL
       SELECT b.identity,b.type,b.namespace,b.key,b.path,NULL,NULL,NULL, 'delete' op FROM restore_known b WHERE b.device=? AND b.scope_hash=? AND NOT EXISTS(SELECT 1 FROM restore_snapshots n WHERE n.session=? AND n.identity=b.identity)
       AND (b.type='data' OR (${allowedFile('b.path')}))
-    ) SELECT ?,row_number() OVER(ORDER BY type,identity),lower(hex(randomblob(16))),type,op,namespace,key,path,value,hash,size FROM difference`,
-    device.id,scopeHash,session,session,session,device.user_id,device.id,device.id,scopeHash,session,...policyValues(scope,policy),session);
+    ) SELECT ?,row_number() OVER(ORDER BY type,identity),lower(hex(randomblob(16))),type,op,namespace,key,path,value,hash,size FROM difference WHERE EXISTS(SELECT 1 FROM restore_sessions WHERE token=?)`,
+    device.id,scopeHash,session,session,session,device.user_id,device.id,device.id,scopeHash,session,...policyValues(scope,policy),session,session);
 }

@@ -160,14 +160,14 @@ Hello
 | --- | --- | --- | --- |
 | action | string | 是 | `check` |
 | session | string | 是 | 发布会话标记 |
-| items | array | 是 | 1–100 项摘要清单，请求总大小不超过 128 KiB |
+| items | array | 是 | 1–1000 项摘要清单，其中数据记录最多 100 项；请求总大小不超过 128 KiB |
 
 | 项目 | 字段 |
 | --- | --- |
 | 数据记录 | `type=data, namespace, key, hash` |
 | 文件 | `type=file, path, hash, size` |
 
-`hash` 是 64 位小写十六进制 SHA-256。文件使用原始字节摘要；数据使用 [内容摘要规范](CONTENT_DIGEST.md)。`size` 为文件字节数。
+`hash` 推荐使用 **32 个小写十六进制字符**，即 SHA-256 的前 **128 bit**。也可传入完整的 64 字符 SHA-256，比对时取前 128 bit。文件指纹按原始字节计算；数据指纹仅对 `value` 计算，规则见 [内容摘要规范](CONTENT_DIGEST.md)。`size` 为文件字节数。
 
 ```json
 {
@@ -178,7 +178,7 @@ Hello
       "type": "data",
       "namespace": "com.example.notes",
       "key": "welcome",
-      "hash": "3698dca7681f48f88f5ad97df04ad2ba310fd4bd34b3f3af53f918775798a827"
+      "hash": "3698dca7681f48f88f5ad97df04ad2ba"
     }
   ]
 }
@@ -374,8 +374,9 @@ Hello
 | JSON 请求 | 128 KiB |
 | 单条记录封装 | 16 KiB |
 | 每次记录推送 | 50 项 |
-| 每次摘要比对 | 100 项 |
+| 每次摘要比对 | 最多 1000 个文件或 100 条数据记录，总数不超过 1000 |
 | 单文件 | 1.5 MiB |
-| 每个用户空间 | 5000 条实体，含目录和删除标记 |
+| 每个文件清单 | 5000 项，含目录和删除标记 |
+| 每个用户的结构化记录 | 5000 条 |
 | 恢复包 | 每页 25 项 |
 | 发布、恢复会话 | 24 小时 |

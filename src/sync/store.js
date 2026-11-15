@@ -5,14 +5,18 @@ import { all, one, stmt, decode } from '../lib/db.js';
 import { contentInfo } from '../storage/content.js';
 import { readCommitContext } from './context.js';
 import { assertFileAllowed } from './settings.js';
+import {fileRows} from '../storage/catalog.js';
+import {commitFile} from '../storage/file-commit.js';
+import {namespace,dataKey} from '../generic/input.js';
 
-export const entities = async (env, owner) => (await all(env, 'SELECT * FROM entities WHERE owner=? ORDER BY path,id', owner)).map(decode);
+export const recordRows=async(env,owner)=>(await all(env,'SELECT * FROM entities WHERE owner=? ORDER BY id',owner)).map(decode);
+export const entities = async (env, owner) => [...await fileRows(env,owner),...await recordRows(env,owner)];
 export const cursor = async (env, owner) => (await one(env, 'SELECT COALESCE(MAX(seq),0) value FROM changes WHERE owner=?', owner)).value;
 const clean = row => ({ id: row.id, kind: row.kind, path: row.path, data: row.data, enabled: row.enabled, deleted: row.deleted });
 
 export async function validate(env, owner, patch, current, allRows) {
   id(patch.id); assert(Number.isSafeInteger(patch.baseVersion) && patch.baseVersion >= 0, 400, '缺少有效基础版本');
-  assert(['file','directory','history','progress','search','config'].includes(patch.kind), 400, '不支持的数据类型');
+  assert(['file','directory','history','progress','search','config','record'].includes(patch.kind), 400, '不支持的数据类型');
   assert(!current || current.kind === patch.kind, 400, '不能修改记录类型');
   const value = { id: patch.id, kind: patch.kind, path: null, data: patch.data ?? {}, enabled: patch.enabled === false || patch.enabled === 0 ? 0 : 1, deleted: patch.deleted ? 1 : 0 };
   assert(value.data && typeof value.data === 'object' && !Array.isArray(value.data), 400, 'data 必须是对象');
@@ -33,9 +37,12 @@ export async function validate(env, owner, patch, current, allRows) {
       value.data = { hash: value.data.hash, size: value.data.size };
     } else value.data = {};
   } else {
-    assert(JSON.stringify(value.data).length <= 16000, 413, '单条记录过大');
+    assert(value.kind==='record'?new TextEncoder().encode(JSON.stringify(value.data)).length<=16384:JSON.stringify(value.data).length<=16000, 413, '单条记录过大');
     assert(typeof value.data.key === 'string' && value.data.key.length > 0 && value.data.key.length <= 2000, 400, '记录需要稳定的跨设备 key');
-    assert(value.id === `${value.kind}_${await digest(value.data.key)}`, 400, '记录 ID 必须由类型和稳定 key 的 SHA-256 组成');
+    if(value.kind==='record'){
+      namespace(value.data.namespace);assert(!value.data.namespace.startsWith('legacy.'),400,'数据分区使用了保留名称');dataKey(value.data.key);assert(Object.hasOwn(value.data,'value'),400,'缺少记录内容');
+      assert(value.id===`record_${await digest(JSON.stringify([value.data.namespace,value.data.key]))}`,400,'记录定位字段不能修改');
+    }else assert(value.id === `${value.kind}_${await digest(value.data.key)}`, 400, '记录 ID 必须由类型和稳定 key 的 SHA-256 组成');
     if (value.kind === 'progress' && !value.deleted) {
       assert(typeof value.data.sessionId === 'string' && value.data.sessionId.length <= 100 && Number.isSafeInteger(value.data.sequence) && value.data.sequence >= 0 && Number.isFinite(value.data.position) && value.data.position >= 0, 400, '播放会话或进度无效');
       assert(!current || current.deleted || current.data.sessionId !== value.data.sessionId || value.data.sequence > current.data.sequence, 409, '该播放会话的进度已经提交');
@@ -45,6 +52,7 @@ export async function validate(env, owner, patch, current, allRows) {
 }
 
 export async function commit(env, owner, principal, input) {
+  if(['file','directory'].includes(input.patch?.kind))return commitFile(env,owner,principal,input,validate);
   id(input.opId); assert(input.patch && typeof input.patch === 'object', 400, '缺少 patch');
   id(input.patch.id); assert(Number.isSafeInteger(input.patch.baseVersion) && input.patch.baseVersion >= 0, 400, '缺少有效基础版本');
   const fingerprint = await digest(JSON.stringify(input));

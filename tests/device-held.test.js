@@ -21,7 +21,7 @@ test('混合推送后第一次分别恢复数据和文件，不重复下发已�
     await h.push();
     const data=await h.start(dataScope);assert.equal(data.status,200,JSON.stringify(data.value));assert.equal(data.value.mode,'delta');assert.equal(data.value.total,0);await h.ack(data.value);
     const files=await h.start(fileScope);assert.equal(files.status,200,JSON.stringify(files.value));assert.equal(files.value.mode,'delta');assert.equal(files.value.total,0);await h.ack(files.value);
-    assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM device_contents WHERE device=?').bind(h.a.deviceId).first()).n,2);
+    assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM device_contents WHERE device=?').bind(h.a.deviceId).first()).n,1);assert.equal(Object.keys((await h.fileState(h.a.deviceId)).held).length,1);
     const next=await h.start(fileScope);assert.equal(next.value.total,0);
   }finally{await h.dispose();}
 });
@@ -60,8 +60,9 @@ test('未完成恢复不会错误保留持有状态，完整推送确认后可�
 
 test('重置同时清空设备持有记录',async()=>{
   const h=await fixture();try{
-    await h.push();assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM device_contents').first()).n,2);
+    await h.push();assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM device_contents').first()).n,1);assert.equal(Object.keys((await h.fileState(h.a.deviceId)).held).length,1);
     const r=await h.request('/api/admin/account/reset',{method:'POST',data:{currentPassword:'test-password-1234',confirmation:'RESET'}});assert.equal(r.status,200);
     assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM device_contents').first()).n,0);
+    assert.equal((await h.db.prepare('SELECT COUNT(*) n FROM json_documents').first()).n,0);
   }finally{await h.dispose();}
 });

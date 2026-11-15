@@ -28,3 +28,5 @@ export async function bytesDigest(bytes){
   return Array.from(new Uint8Array(hash),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 export const valueDigest=value=>bytesDigest(encoder.encode(canonicalValue(value)));
+export const bytesFingerprint=async bytes=>(await bytesDigest(bytes)).slice(0,32);
+export const valueFingerprint=async value=>(await valueDigest(value)).slice(0,32);

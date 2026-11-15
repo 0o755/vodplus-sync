@@ -29,7 +29,7 @@ export async function pushData(env,device,input){
     assert(item.deleted||item.value!==undefined,400,'缺少记录内容');
     const value=JSON.stringify({namespace:space,key,value:item.deleted?null:item.value});
     assert(new TextEncoder().encode(value).length<=16384,413,'单条记录超过 16 KiB');
-    let hash=null;if(!item.deleted&&input.session){try{hash=await valueDigest(item.value);}catch{assert(false,400,'JSON 内容不能生成有效摘要');}}
+    let hash=null;if(!item.deleted&&input.session){try{hash=(await valueDigest(item.value)).slice(0,32);}catch{assert(false,400,'JSON 内容不能生成有效摘要');}}
     rows.push({id:'record_'+await digest(JSON.stringify([space,key])),key,data:value,hash,deleted:item.deleted});
   }
   const fingerprint=await digest(JSON.stringify(['data',input]));

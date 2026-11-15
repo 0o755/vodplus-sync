@@ -2,13 +2,13 @@
 import {json} from './lib/http.js';
 const required=[
  ['administrators','0001_initial.sql'],['devices','0001_initial.sql'],['entities','0001_initial.sql'],
- ['file_contents','0002_d1_files.sql'],['file_chunks','0002_d1_files.sql'],
+ ['file_contents','0013_compact_file_storage.sql'],['json_documents','0013_compact_file_storage.sql'],['storage_format','0013_compact_file_storage.sql'],['reject_row_file_insert','0013_compact_file_storage.sql'],['reject_row_file_update','0013_compact_file_storage.sql'],
  ['sync_settings','0005_sync_settings.sql'],['device_config','0006_device_config.sql'],
  ['maintenance_actions','0008_factory_reset.sql'],
  ['restore_sessions','0009_generic_sync.sql'],['restore_snapshots','0009_generic_sync.sql'],
  ['restore_items','0009_generic_sync.sql'],['restore_baselines','0009_generic_sync.sql'],['restore_known','0009_generic_sync.sql'],
  ['publish_sessions','0009_generic_sync.sql'],['publish_items','0009_generic_sync.sql'],['publish_checks','0010_publish_checks.sql'],['device_contents','0010_publish_checks.sql'],
- ['entity_record_lookup','0011_query_indexes.sql'],['entity_path_lookup','0011_query_indexes.sql'],['entity_disabled_directories','0011_query_indexes.sql'],
+ ['entity_record_lookup','0011_query_indexes.sql'],
  ['sync_heads','0012_sync_summaries.sql'],['device_sync_summaries','0012_sync_summaries.sql'],['sync_head_insert','0012_sync_summaries.sql'],['sync_head_update','0012_sync_summaries.sql'],['reset_sync_summaries','0012_sync_summaries.sql']
 ];
 export async function health(env){
@@ -19,8 +19,8 @@ export async function health(env){
     if(!names.has('factory_reset'))missing.add('0008_factory_reset.sql');
     if(!names.has('reset_generic_sync'))missing.add('0009_generic_sync.sql');
     if(!names.has('reset_publish_checks'))missing.add('0010_publish_checks.sql');
-    return json({ok:missing.size===0,requiredSchema:12,syncApi:2,capabilities:['push-check','device-held-content','compact-sync-state'],automaticMigration:true,code:missing.size?'SCHEMA_NOT_READY':'OK',missingMigrations:[...missing]},missing.size?503:200);
-  }catch(error){const detail=failureDetail(error);return json({ok:false,requiredSchema:12,...(detail.code==='DATABASE_LIMIT'?detail:{code:'DATABASE_UNAVAILABLE'})},503);}
+    return json({ok:missing.size===0,requiredSchema:13,syncApi:2,capabilities:['push-check','device-held-content','compact-sync-state','json-file-catalog','blob-files','fingerprint-128'],automaticMigration:true,code:missing.size?'SCHEMA_NOT_READY':'OK',missingMigrations:[...missing]},missing.size?503:200);
+  }catch(error){const detail=failureDetail(error);return json({ok:false,requiredSchema:13,...(detail.code==='DATABASE_LIMIT'?detail:{code:'DATABASE_UNAVAILABLE'})},503);}
 }
 export function failureCode(error){
   const message=errorText(error);

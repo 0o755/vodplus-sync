@@ -2,6 +2,8 @@
 
 部署需要 Cloudflare 和 GitHub 账号。项目使用一个 Worker 提供接口与管理页面，一个 D1 数据库保存业务数据和文件内容。
 
+**存储重建会清空业务数据。** 当前重建迁移 `0013_compact_file_storage.sql` 会建立空的 JSON 清单与 BLOB 存储；部署到有数据的数据库前，应先导出需要保留的内容。重建后重新创建管理员和用户、绑定设备。
+
 ## 一键部署
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2F0o755%2Fvodplus-sync)
@@ -37,7 +39,7 @@
 3. 使用同一数据库配置发布 Worker。
 4. 清理本次部署的临时配置。
 
-重新发布会保留管理员和业务数据。服务首次处理 API 请求时也会检查所需结构并补齐缺失项。
+存储格式建立后，常规代码发布保留管理员和业务数据。格式标记与迁移记录会阻止重复重建；首次 API 请求会检查并补齐所需结构。
 
 ## 验证服务
 
@@ -46,9 +48,9 @@
 ```json
 {
   "ok": true,
-  "requiredSchema": 12,
+  "requiredSchema": 13,
   "syncApi": 2,
-  "capabilities": ["push-check","device-held-content","compact-sync-state"],
+  "capabilities": ["push-check","device-held-content","compact-sync-state","json-file-catalog","blob-files","fingerprint-128"],
   "automaticMigration": true,
   "code": "OK",
   "missingMigrations": []
@@ -94,7 +96,7 @@ Cloudflare D1 免费计划的主要额度：
 
 依据：[D1 限制](https://developers.cloudflare.com/d1/platform/limits/)与 [D1 定价](https://developers.cloudflare.com/d1/platform/pricing/)。额度和套餐以 Cloudflare 公布的内容为准。
 
-项目单文件限制为 1.5 MiB。文件以 Base64 分块保存，编码约增加三分之一体积；历史内容、索引和恢复快照也占用空间。完整恢复会写入服务端快照，应结合数据规模和操作频率关注用量。
+项目单文件限制为 1.5 MiB，每份正文存为一行原始 BLOB。目录清单、文件比对状态和文件恢复快照保存为 JSON，通常一份文档只占一行；文档超过安全行大小时自动分片。历史内容、索引和恢复快照也占用空间。
 
 免费计划超过每日读写额度时，数据库查询会失败，需等待额度恢复或调整套餐。
 

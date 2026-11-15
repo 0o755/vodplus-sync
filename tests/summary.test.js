@@ -77,13 +77,26 @@ test('未经摘要比对的发布不能把他人并发写入标记为本机已�
   }finally{await h.dispose();}
 });
 
-test('空库分步补齐结构，每次初始化保持在免费查询次数内',async()=>{
+test('重叠范围确认不同快照后，不会复用过时的空恢复结果',async()=>{
+  const h=await fixture();try{
+    const single={namespaces:[],files:true,roots:['a.py']};
+    await h.file('before');await h.complete((await h.start(single)).value);
+    const earlier=(await h.start(files,{full:true})).value;
+    await h.file('after');await h.complete((await h.start(single)).value);
+    await h.complete(earlier);
+    const repair=(await h.start(single)).value;assert.equal(repair.total,1);
+    const page=(await h.post({action:'page',session:repair.session,page:repair.page})).value;
+    assert.equal((await h.post({action:'content',session:repair.session,content:page.items[0].content})).value,'after');
+  }finally{await h.dispose();}
+});
+
+test('空库使用一个事务完成重建，重复检查不再清空数据',async()=>{
   const h=await createHarness({setup:false,migrations:0});try{
     const built=await build({entryPoints:['src/schema/ensure.js'],bundle:true,write:false,format:'esm',platform:'browser',loader:{'.sql':'text'}});
     const {ensureSchema}=await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64'));
     const meter=measuredDatabase(h.db),env={DB:meter.DB};
-    assert.equal(await ensureSchema(env),false);assert.ok(meter.queries.length<=42);
-    meter.queries.length=0;assert.equal(await ensureSchema(env),true);assert.ok(meter.queries.length<40);
+    assert.equal(await ensureSchema(env),true);
+    meter.queries.length=0;assert.equal(await ensureSchema(env),true);assert.equal(meter.queries.length,0);
     assert.ok(await h.db.prepare("SELECT name FROM sqlite_master WHERE name='device_sync_summaries'").first());
   }finally{await h.dispose();}
 });

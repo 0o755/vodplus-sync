@@ -1,5 +1,5 @@
 // 通用手动同步参考 SDK：服务端管理版本和差异，调用方只负责自己的数据与本地 I/O。
-import {valueDigest,bytesDigest} from '../src/lib/content-digest.js';
+import {valueFingerprint,bytesFingerprint} from '../src/lib/content-digest.js';
 export class SyncClient {
   constructor({server,token,fetch:transport=globalThis.fetch,onProgress=()=>{}}){
     this.server=server.replace(/\/$/,'');this.token=token;this.transport=transport;this.onProgress=onProgress;
@@ -27,7 +27,7 @@ export class SyncClient {
     const compare=items=>this.json('push',{action:'check',session:session.session,items});
     const flush=async()=>{
       if(!batch.length)return;
-      const proposed=await Promise.all(batch.map(async item=>({type:'data',namespace:space,key:item.key,hash:await valueDigest(item.value)})));
+      const proposed=await Promise.all(batch.map(async item=>({type:'data',namespace:space,key:item.key,hash:await valueFingerprint(item.value)})));
       const result=await compare(proposed);const changed=[];
       for(let i=0;i<batch.length;i++){
         const item=batch[i],namespace=space;
@@ -58,9 +58,9 @@ export class SyncClient {
     };
     for await(const file of files){
       // 仅保留小清单和按需读取函数，不将全部文件内容缓存在内存中。
-      const bytes=await file.read();const manifest={type:'file',path:file.path,hash:await bytesDigest(bytes),size:bytes.byteLength};
+      const bytes=await file.read();const manifest={type:'file',path:file.path,hash:await bytesFingerprint(bytes),size:bytes.byteLength};
       const length=new TextEncoder().encode(JSON.stringify(manifest)).length;
-      if(fileBatch.length&&(fileBatch.length===100||fileBatchSize+length>100000))await flushFiles();
+      if(fileBatch.length&&(fileBatch.length===1000||fileBatchSize+length>100000))await flushFiles();
       fileBatch.push({file,manifest});fileBatchSize+=length;
     }
     await flushFiles();
