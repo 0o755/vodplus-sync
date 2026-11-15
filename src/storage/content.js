@@ -22,8 +22,10 @@ export async function putContent(env, owner, hash, input) {
   await env.DB.batch(batch);
 }
 export async function getContent(env, owner, hash) {
-  const info = await contentInfo(env, owner, hash); if (!info) return null;
-  const chunks = await all(env, 'SELECT part,content FROM file_chunks WHERE owner=? AND hash=? ORDER BY part', owner, hash);
+  // 一次读取元信息和内容，空文件通过 LEFT JOIN 保留元信息。
+  const rows = await all(env, 'SELECT f.size,c.part,c.content FROM file_contents f LEFT JOIN file_chunks c ON c.owner=f.owner AND c.hash=f.hash WHERE f.owner=? AND f.hash=? ORDER BY c.part', owner, hash);
+  if (!rows.length) return null;
+  const info = rows[0]; const chunks = rows.filter(row => row.part !== null);
   assert(chunks.length === Math.ceil(info.size / CHUNK_SIZE), 500, '文件内容不完整');
   const bytes = new Uint8Array(info.size); let offset = 0;
   for (const [index, chunk] of chunks.entries()) {

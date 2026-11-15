@@ -26,7 +26,7 @@ export default {
       return secure(response);
     } catch (error) {
       const status = error instanceof Fault ? error.status : 500;
-      return secure(json({ error: status === 500 ? '服务暂时不可用，请检查数据库迁移和资源绑定' : error.message, detail: error.detail }, status));
+      return secure(json({ error: status === 500 ? '服务暂时不可用，请检查数据库迁移和资源绑定' : error.message, detail: error.detail }, status, status === 503 && error.detail?.retryable ? { 'retry-after': '1' } : {}));
     }
   }
 };

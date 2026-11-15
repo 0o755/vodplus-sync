@@ -22,7 +22,7 @@ export async function openEditor({row,rows,base,refresh,users,onDirty}) {
     on('#code','input',()=>{onDirty($('#code').value!==original);if($('#save'))$('#save').textContent=$('#code').value===original?'保存修改':'保存修改 •';});
   }
   const commit=async patch=>{await send(`${base}/commit`,{opId:crypto.randomUUID(),restore:!!row.deleted,patch:{...row,baseVersion:row.version,...patch}});onDirty(false);await refresh();};
-  on('#save','click',async()=>{let data;if(isFile)data=await putFile(base,new TextEncoder().encode($('#code').value));else{try{data=JSON.parse($('#code').value);}catch{throw new Error('记录 JSON 格式错误');}}await commit({data});toast('修改已保存，等待设备拉取');});
+  on('#save','click',async()=>{let data;if(isFile)data=await putFile(base,new TextEncoder().encode($('#code').value),row.path);else{try{data=JSON.parse($('#code').value);}catch{throw new Error('记录 JSON 格式错误');}}await commit({data});toast('修改已保存，等待设备拉取');});
   on('#rename','click',async()=>{const input=await form('重命名 / 移动',[{name:'path',label:'新相对路径',value:row.path,hint:'文件 ID 保持不变；目标父目录需要已存在。'}]);if(input)await commit({path:input.path});});
   on('#enable','click',()=>commit({enabled:!row.enabled}));
   on('#delete','click',async()=>{if(await confirm(row.deleted?'恢复此项':'移入回收站',row.deleted?'恢复会生成新版本。删除目录的子项需要逐项恢复。':'设备下次同步会收到删除记录。旧内容可从回收站恢复。'))await commit({deleted:!row.deleted});});

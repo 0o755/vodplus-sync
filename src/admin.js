@@ -5,10 +5,13 @@ import { all, one, run, event } from './lib/db.js';
 import { entities, commit } from './sync/store.js';
 import { download, upload } from './sync/routes.js';
 import { copyContent, getContent } from './storage/content.js';
+import { syncSettings, updateSyncSettings } from './sync/settings.js';
 
 export async function ownerExists(env, owner) { assert(owner === 'public' || await one(env, 'SELECT id FROM users WHERE id=?', owner), 404, '人物不存在'); return owner; }
 export async function adminRoute(env, request, url) {
   const path = url.pathname; const method = request.method;
+  if (path === '/api/admin/sync-settings' && method === 'GET') return json(await syncSettings(env));
+  if (path === '/api/admin/sync-settings' && method === 'PUT') return json(await updateSyncSettings(env, await body(request)));
   if (path === '/api/admin/overview' && method === 'GET') return json({
     users: await all(env, 'SELECT * FROM users ORDER BY created'),
     devices: await all(env, 'SELECT d.id,d.user_id,d.name,d.revoked,d.last_seen,d.cursor,d.status,u.name user_name FROM devices d JOIN users u ON d.user_id=u.id ORDER BY last_seen DESC'),

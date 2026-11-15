@@ -15,7 +15,7 @@ async function roundtrip(bytes,path){
   return {hash,fileId};
 }
 test('完整上传并下载 1.5 MiB 随机二进制，数据库各块低于行限制',async()=>{
-  const {hash}=await roundtrip(randomBytes(1572864),'binary.dat');
+  const {hash}=await roundtrip(randomBytes(1572864),'binary.jar');
   const result=await h.db.prepare('SELECT COUNT(*) parts, MAX(length(content)) largest FROM file_chunks WHERE owner=? AND hash=?').bind(owner,hash).first();
   assert.equal(result.parts,8);assert.equal(result.largest,262144);
 });

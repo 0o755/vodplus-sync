@@ -3,6 +3,8 @@ import { assert, id, relativePath, inside } from '../lib/http.js';
 import { digest } from '../lib/crypto.js';
 import { all, one, stmt, decode } from '../lib/db.js';
 import { contentInfo } from '../storage/content.js';
+import { readCommitContext } from './context.js';
+import { assertFileAllowed } from './settings.js';
 
 export const entities = async (env, owner) => (await all(env, 'SELECT * FROM entities WHERE owner=? ORDER BY path,id', owner)).map(decode);
 export const cursor = async (env, owner) => (await one(env, 'SELECT COALESCE(MAX(seq),0) value FROM changes WHERE owner=?', owner)).value;
@@ -44,15 +46,30 @@ export async function validate(env, owner, patch, current, allRows) {
 
 export async function commit(env, owner, principal, input) {
   id(input.opId); assert(input.patch && typeof input.patch === 'object', 400, '缺少 patch');
+  id(input.patch.id); assert(Number.isSafeInteger(input.patch.baseVersion) && input.patch.baseVersion >= 0, 400, '缺少有效基础版本');
   const fingerprint = await digest(JSON.stringify(input));
-  const previous = await one(env, 'SELECT * FROM receipts WHERE principal=? AND op_id=?', principal, input.opId);
+  // 只因空间游标前进而失败时重读；始终沿用客户端原 baseVersion，绝不自动覆盖。
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const result = await attemptCommit(env, owner, principal, input, fingerprint);
+    if (result) return result;
+  }
+  assert(false, 503, '同步空间暂时繁忙，请保留原操作稍后重试', { retryable: true, retryAfterMs: 1000 });
+}
+async function attemptCommit(env, owner, principal, input, fingerprint) {
+  const checks = await env.DB.batch([
+    stmt(env, 'SELECT * FROM receipts WHERE principal=? AND op_id=?', principal, input.opId),
+    stmt(env, 'SELECT id FROM conflicts WHERE principal=? AND op_id=?', principal, input.opId)
+  ]);
+  const previous = checks[0].results[0];
   if (previous) { assert(previous.fingerprint === fingerprint, 409, '同一 opId 不能提交不同内容'); return JSON.parse(previous.result); }
-  const oldConflict = await one(env, 'SELECT id FROM conflicts WHERE principal=? AND op_id=?', principal, input.opId);
+  const oldConflict = checks[1].results[0];
   assert(!oldConflict, 409, '此操作已产生冲突，请处理后用新 opId 提交', { conflictId: oldConflict?.id });
-  const checkpoint = await cursor(env, owner); const rows = await entities(env, owner);
-  assert(rows.length < 5000 || rows.some(r => r.id === input.patch.id), 409, '当前空间已达 5000 条记录，请先归档');
-  const current = rows.find(r => r.id === input.patch.id);
+  const { checkpoint, rows, current, total, policy } = await readCommitContext(env, owner, input.patch);
+  assert(total < 5000 || current, 409, '当前空间已达 5000 条记录，请先归档');
   const proposed = await validate(env, owner, input.patch, current, rows);
+  const checkPolicy = policy && !proposed.deleted && (!current || current.data.hash !== proposed.data.hash);
+  if (checkPolicy) assertFileAllowed(policy, proposed.path);
+  const policyRevision = checkPolicy ? policy.revision : null;
   assert(!current?.deleted || proposed.deleted || input.restore === true, 409, '记录已删除，恢复需要显式 restore');
   let patches = [{ ...proposed, baseVersion: input.patch.baseVersion }];
   if (current?.kind === 'directory' && !current.deleted) {
@@ -69,8 +86,9 @@ export async function commit(env, owner, principal, input) {
   const result = { items: snapshots };
   const statements = [stmt(env, `INSERT OR IGNORE INTO receipts(principal,op_id,fingerprint,nonce,result,created)
     SELECT ?,?,?,?,?,? WHERE (SELECT COALESCE(MAX(seq),0) FROM changes WHERE owner=?)=?
-    AND COALESCE((SELECT version FROM entities WHERE owner=? AND id=?),0)=?`,
-  principal, input.opId, fingerprint, nonce, JSON.stringify(result), now, owner, checkpoint, owner, proposed.id, input.patch.baseVersion)];
+    AND COALESCE((SELECT version FROM entities WHERE owner=? AND id=?),0)=?
+    AND (? IS NULL OR EXISTS(SELECT 1 FROM sync_settings WHERE id=1 AND revision=?))`,
+  principal, input.opId, fingerprint, nonce, JSON.stringify(result), now, owner, checkpoint, owner, proposed.id, input.patch.baseVersion, policyRevision, policyRevision)];
   for (const p of snapshots) statements.push(stmt(env, `INSERT INTO entities(owner,id,kind,path,version,data,deleted,enabled,source,updated)
     SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM receipts WHERE principal=? AND op_id=? AND nonce=?)
     ON CONFLICT(owner,id) DO UPDATE SET path=excluded.path,version=excluded.version,data=excluded.data,deleted=excluded.deleted,enabled=excluded.enabled,source=excluded.source,updated=excluded.updated`,
@@ -80,10 +98,16 @@ export async function commit(env, owner, principal, input) {
     if (!String(error).includes('UNIQUE constraint')) throw error;
     assert(false, 409, '移动后的路径已被其他文件占用');
   }
-  const receipt = await one(env, 'SELECT * FROM receipts WHERE principal=? AND op_id=?', principal, input.opId);
+  const outcome = await env.DB.batch([
+    stmt(env, 'SELECT * FROM receipts WHERE principal=? AND op_id=?', principal, input.opId),
+    stmt(env, 'SELECT * FROM entities WHERE owner=? AND id=?', owner, proposed.id)
+  ]);
+  const receipt = outcome[0].results[0];
   if (receipt) { assert(receipt.fingerprint === fingerprint, 409, 'opId 内容不一致'); return JSON.parse(receipt.result); }
+  const latest = decode(outcome[1].results[0]);
+  if ((latest?.version || 0) === input.patch.baseVersion) return null;
   const conflictId = crypto.randomUUID();
   await stmt(env, 'INSERT OR IGNORE INTO conflicts(id,owner,principal,op_id,proposed,created) VALUES(?,?,?,?,?,?)', conflictId, owner, principal, input.opId, JSON.stringify(input), now).run();
   const saved = await one(env, 'SELECT id FROM conflicts WHERE principal=? AND op_id=?', principal, input.opId);
-  assert(false, 409, '版本已变化，候选内容已保留', { conflictId: saved.id, current: decode(await one(env, 'SELECT * FROM entities WHERE owner=? AND id=?', owner, proposed.id)) });
+  assert(false, 409, '版本已变化，候选内容已保留', { conflictId: saved.id, current: latest });
 }

@@ -10,12 +10,28 @@
 POST /api/bind
 Content-Type: application/json
 
-{"username":"后台已有用户名","deviceName":"客厅电视","code":"一次性绑定码"}
+{"code":"一次性绑定码","deviceName":"客厅电视"}
 ```
 
-返回 201：`{ deviceId, userId, token }`。此后所有 `/api/sync/*` 使用 `Authorization: Bearer <token>`。接口从凭证确定 owner，不信任请求中的 userId，也没有设备自动注册人物的接口。
+返回 201：`{ deviceId, userId, token, username }`。`username` 是后台当前人物名称；人物由一次性设备码决定。旧客户端可以继续传 username，但该字段不参与身份判定，也不能改变设备码所属人物。此后所有 `/api/sync/*` 使用 `Authorization: Bearer <token>`。接口从凭证确定 owner，不信任请求中的 userId，也没有设备自动注册人物的接口。
 
 管理员使用 `/api/setup` 和 `/api/login` 建立 Cookie 会话。空库可直接 POST `{username,password}` 到 setup，密码最低 5 位；已有管理员返回 409。不需要初始化 Secret，不将管理员密码或 Cookie 交给 App。
+
+## 一键绑定与同步规则
+
+后台在用户绑定弹窗生成链接：`vodplus://sync/bind?server=<encodeURIComponent(HTTPS服务根地址)>&code=<encodeURIComponent(设备码)>`。仅在用户点击时打开；不携带用户名、管理员凭据或设备 token。可选 Android 兼容入口为 `intent://sync/bind?...#Intent;scheme=vodplus;package=com.fongmi.vodplus;end`。App 必须校验 HTTPS、参数和现有身份，不能静默覆盖不同人物的本地队列。设备码仍为 10 分钟有效、单次消费。
+
+每轮同步开始使用设备 Bearer 请求 `GET /api/sync/settings`，返回：
+
+```json
+{"fileExtensions":["py","js","txt","json","m3u8","jar","php","html"],"includeExtensionless":true,"revision":1}
+```
+
+全局默认，后缀小写且不带点。按文件名最后一个点判定，大小写不敏感；无点文件和 `.hide` 视为无后缀，`.hide.json` 的后缀为 json。目录始终同步。
+
+规则 revision 改变时，App 从 cursor=0 重新核对，利用已有 ID/version/hash 避免重复覆盖。不匹配的本地文件不能被当作删除；保留元数据和本地待办，重新允许该类型后可以恢复。服务端 changes 不过滤，旧内容与历史下载保留。
+
+规则约束人物空间新文件或内容变化；已存文件删除、移动、停用及相同内容的恢复仍可提交。公共爬虫库不直接参与设备同步，发布不受此规则限制；复制到人物空间时遵守人物同步规则。
 
 ## 文件完整上传
 
@@ -27,7 +43,7 @@ Content-Type: application/octet-stream
 <原始文件字节>
 ```
 
-上限 1,572,864 字节。200 返回 `{ hash, size }`；422 表示摘要不匹配。上传不会发布文件版本，随后必须提交元数据。重复上传同一内容安全。D1 内容按凭证对应的 owner 与 hash 隔离，不接收客户端路径。服务端内部存储块不改变整文件上传协议。
+上限 1,572,864 字节。200 返回 `{ hash, size }`；422 表示摘要不匹配。上传不会发布文件版本，随后必须提交元数据。重复上传同一内容安全。可选 `?path=<encodeURIComponent(相对路径)>` 会在读取上传正文前校验文件规则。旧接口只有 hash，无法单凭哈希判断类型，因此仍接受不带 path 的内容暂存，但新文件/新内容的 commit 必须通过规则校验；不符合时返回 422，detail.code=`FILE_TYPE_NOT_ALLOWED`，并给出当前 revision。D1 内容按凭证对应的 owner 与 hash 隔离，不接收客户端路径。服务端内部存储块不改变整文件上传协议。
 
 ## 幂等提交
 
@@ -51,6 +67,8 @@ Content-Type: application/octet-stream
 200 返回 `{ items: [实体快照...] }`。快照有 `id,kind,path,version,data,enabled,deleted,source,updated`；目录操作可能包含多个子项。版本从 1 递增，owner 不作为可写字段。
 
 409 冲突响应包含 `detail.conflictId`（仅已保存候选的版本冲突）和当前实体。路径占用、已删除或会话序号过时也会返回 409，可能没有 conflictId；客户端均应保留本地待办并提示原因。不得自动把旧 patch 的 baseVersion 替换为最新值。
+
+无关文件导致空间序号变化时，服务端保持原 baseVersion 自动重读并最多尝试 4 次，不保存伪冲突。持续竞争返回 503、`Retry-After: 1`、`detail.retryable=true`；保留原 opId 和完整请求体重试，不自动修改基础版本。文件内容上传/下载可有界并发，App 元数据 commit 继续有序。
 
 提交响应丢失时重发相同 opId，服务端返回同一结果；不会增加版本。服务端保留回执，无短期重试窗口限制。JSON 字段顺序也应保持稳定，建议队列存储已序列化的原请求。
 
@@ -139,6 +157,8 @@ Content-Type: application/json
 | 方法 / 路径 | 功能 |
 |---|---|
 | GET `/api/admin/overview` | 用户、设备、发布和最近日志 |
+| GET `/api/admin/sync-settings` | 读取全局文件规则 |
+| PUT `/api/admin/sync-settings` | fileExtensions/includeExtensionless/revision；版本冲突返回 409 |
 | POST `/api/admin/users` | `{name}` 创建人物 |
 | PATCH `/api/admin/users/:id` | `{name?,enabled?}` |
 | POST `/api/admin/users/:id/binding` | 一次性设备码 |

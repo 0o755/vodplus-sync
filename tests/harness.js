@@ -8,7 +8,7 @@ export async function createHarness({assets=false,setup=true}={}){
   const bundle=await build({entryPoints:['src/worker.js'],bundle:true,write:false,format:'esm',platform:'browser'});
   const staticFiles=new Map();
   if(assets){
-    const files=['index.html','styles.css','app.js','ui.js','icons.js','share.html','share.js','deploy.html','deploy.js','pages/overview.js','pages/shares.js','pages/people.js','pages/files.js','pages/file-editor.js','pages/revisions.js'];
+    const files=['index.html','styles.css','app.js','ui.js','icons.js','share.html','share.js','deploy.html','deploy.js','lib/binding-links.js','pages/binding.js','pages/sync-settings.js','pages/overview.js','pages/shares.js','pages/people.js','pages/files.js','pages/file-editor.js','pages/revisions.js'];
     for(const file of files)staticFiles.set('/'+file,await readFile(new URL('../web/'+file,import.meta.url)));
   }
   const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',d1Databases:['DB'],serviceBindings:{ASSETS:request=>{
@@ -24,6 +24,10 @@ export async function createHarness({assets=false,setup=true}={}){
   for(const statement of fileSql.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
   const shareSql=(await readFile(new URL('../migrations/0003_permanent_shares.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
   await db.prepare(shareSql).run();
+  const lookupSql=(await readFile(new URL('../migrations/0004_sync_lookup.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
+  for(const statement of lookupSql.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+  const settingsSql=(await readFile(new URL('../migrations/0005_sync_settings.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
+  for(const statement of settingsSql.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
   let cookie='';
   const request=async(path,{method='GET',data,token,admin=true,raw,headers={}}={})=>{
     const response=await mf.dispatchFetch('http://localhost'+path,{method,headers:{...(admin&&cookie?{cookie}:{}),...(token?{authorization:`Bearer ${token}`} : {}),...(data?{'content-type':'application/json'}:{}),...headers},body:data?JSON.stringify(data):raw});
@@ -35,7 +39,7 @@ export async function createHarness({assets=false,setup=true}={}){
     if(response.status!==200)throw new Error(JSON.stringify(response.value));cookie=response.headers.get('set-cookie').split(';')[0];
   }
   const createUser=async name=>(await request('/api/admin/users',{method:'POST',data:{name}})).value.id;
-  const bind=async(userId,username)=>{const code=(await request(`/api/admin/users/${userId}/binding`,{method:'POST',data:{}})).value.code;return (await request('/api/bind',{method:'POST',admin:false,data:{code,username,deviceName:'测试设备'}})).value;};
+  const bind=async userId=>{const code=(await request(`/api/admin/users/${userId}/binding`,{method:'POST',data:{}})).value.code;return (await request('/api/bind',{method:'POST',admin:false,data:{code,deviceName:'测试设备'}})).value;};
   const put=async(owner,path,text='print("hello")',extra={})=>{
     const hash=digest(text);await request(`/api/admin/spaces/${owner}/blobs/${hash}`,{method:'PUT',raw:text});
     const patch={id:crypto.randomUUID(),kind:'file',path,baseVersion:0,data:{hash,size:Buffer.byteLength(text)},...extra};

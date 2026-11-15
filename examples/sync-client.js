@@ -25,7 +25,7 @@ export class SyncClient {
     for(const item of await this.storage.pending(owner)){
       if(item.owner!==owner)throw new Error('队列人物不匹配');
       try{
-        if(item.bytes)await this.request(`/api/sync/blobs/${item.patch.data.hash}`,{method:'PUT',body:item.bytes});
+        if(item.bytes)await this.request(`/api/sync/blobs/${item.patch.data.hash}?path=${encodeURIComponent(item.patch.path)}`,{method:'PUT',body:item.bytes});
         const result=await (await this.post('/api/sync/commit',{opId:item.opId,patch:item.patch})).json();
         await this.storage.committed(owner,item.opId,result.items);
       }catch(error){

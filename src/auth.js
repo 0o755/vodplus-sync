@@ -22,7 +22,9 @@ export async function device(env, request) {
   assert(raw && /^[a-f0-9]{64}$/.test(raw), 401, '设备凭证无效');
   const row = await one(env, 'SELECT d.* FROM devices d JOIN users u ON u.id=d.user_id WHERE d.token_hash=? AND d.revoked=0 AND u.enabled=1', await digest(raw));
   assert(row, 401, '设备已撤销或用户已停用');
-  await run(env, 'UPDATE devices SET last_seen=? WHERE id=?', Date.now(), row.id);
+  // 批量传文件时最多每 30 秒刷新一次活跃时间，鉴权仍逐请求执行。
+  const now = Date.now();
+  if (!row.last_seen || row.last_seen < now - 30000) await run(env, 'UPDATE devices SET last_seen=? WHERE id=? AND (last_seen IS NULL OR last_seen<?)', now, row.id, now - 30000);
   return row;
 }
 function cookie(request, value, age) { return `vp_session=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${new URL(request.url).protocol === 'https:' ? '; Secure' : ''}`; }
@@ -38,16 +40,19 @@ export async function authRoute(env, request, path) {
   origin(request); await throttle(env, request, path); const input = await body(request);
   if (path === '/api/bind') {
     const credential = token(); const deviceId = crypto.randomUUID(); const now = Date.now();
-    const hash = await digest(String(input.code));
+    assert(typeof input.code === 'string' && input.code.trim().length > 0 && input.code.length <= 256, 400, '请填写设备码');
+    const hash = await digest(input.code.trim());
     // 设备创建与绑定码消费在同一事务内，失败不会烧掉绑定码。
-    const username = name(input.username); const deviceName = name(input.deviceName);
+    // 兼容旧请求中的 username 字段，但人物归属始终只由设备码确定。
+    const deviceName = name(input.deviceName);
     const results = await env.DB.batch([
-      env.DB.prepare('INSERT INTO devices(id,user_id,name,token_hash,last_seen) SELECT ?,user_id,?,?,? FROM bindings WHERE hash=? AND consumed=0 AND expires>? AND user_id=(SELECT id FROM users WHERE name=? AND enabled=1)').bind(deviceId, deviceName, await digest(credential), now, hash, now, username),
-      env.DB.prepare('UPDATE bindings SET consumed=1 WHERE hash=? AND EXISTS(SELECT 1 FROM devices WHERE id=?)').bind(hash, deviceId)
+      env.DB.prepare('INSERT INTO devices(id,user_id,name,token_hash,last_seen) SELECT ?,b.user_id,?,?,? FROM bindings b JOIN users u ON u.id=b.user_id AND u.enabled=1 WHERE b.hash=? AND b.consumed=0 AND b.expires>?').bind(deviceId, deviceName, await digest(credential), now, hash, now),
+      env.DB.prepare('UPDATE bindings SET consumed=1 WHERE hash=? AND EXISTS(SELECT 1 FROM devices WHERE id=?)').bind(hash, deviceId),
+      env.DB.prepare('SELECT d.user_id,u.name username FROM devices d JOIN users u ON u.id=d.user_id WHERE d.id=?').bind(deviceId)
     ]);
-    assert(results[0].meta.changes === 1, 401, '用户名或绑定码错误，或绑定码已过期');
-    const row = await one(env, 'SELECT user_id FROM devices WHERE id=?', deviceId);
-    return json({ deviceId, userId: row.user_id, token: credential }, 201);
+    assert(results[0].meta.changes === 1, 401, '设备码无效、已使用或过期，或所属用户已停用');
+    const row = results[2].results[0];
+    return json({ deviceId, userId: row.user_id, token: credential, username: row.username }, 201);
   }
   assert(typeof input.password === 'string' && input.password.length >= 5 && input.password.length <= 200, 400, '密码需要 5–200 个字符');
   if (path === '/api/setup') {

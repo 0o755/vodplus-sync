@@ -4,9 +4,12 @@ import { digest } from '../lib/crypto.js';
 import { all, one, run, event } from '../lib/db.js';
 import { commit, cursor } from './store.js';
 import { putContent, getContent } from '../storage/content.js';
+import { syncSettings, assertFileAllowed } from './settings.js';
 
 export async function upload(env, request, owner, hash) {
   assert(/^[a-f0-9]{64}$/.test(hash), 400, '摘要无效');
+  const path = new URL(request.url).searchParams.get('path');
+  if (owner !== 'public' && path !== null) assertFileAllowed(await syncSettings(env), path);
   const content = await bytes(request, 1572864);
   assert(await digest(content) === hash, 422, '内容 SHA-256 不匹配');
   await putContent(env, owner, hash, content);
@@ -22,6 +25,7 @@ export async function download(env, owner, entityId, version) {
 }
 export async function syncRoute(env, request, url, device) {
   const owner = device.user_id; const path = url.pathname; const principal = `device:${device.id}`;
+  if (path === '/api/sync/settings' && request.method === 'GET') return json(await syncSettings(env));
   if (request.method === 'PUT' && path.startsWith('/api/sync/blobs/')) return upload(env, request, owner, path.split('/').pop());
   if (request.method === 'GET' && path.startsWith('/api/sync/files/')) return download(env, owner, path.split('/').pop(), url.searchParams.get('version'));
   if (path === '/api/sync/changes' && request.method === 'GET') {
