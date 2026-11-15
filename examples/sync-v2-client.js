@@ -1,4 +1,5 @@
 // 通用手动同步参考 SDK：服务端管理版本和差异，调用方只负责自己的数据与本地 I/O。
+import {valueDigest,bytesDigest} from '../src/lib/content-digest.js';
 export class SyncClient {
   constructor({server,token,fetch:transport=globalThis.fetch,onProgress=()=>{}}){
     this.server=server.replace(/\/$/,'');this.token=token;this.transport=transport;this.onProgress=onProgress;
@@ -20,11 +21,21 @@ export class SyncClient {
 
   async pushAll({scope,records=[],files=[]}){
     const session=await this.json('push',{action:'start',requestId:crypto.randomUUID(),scope});
-    const progress={task:'push',records:0,files:0,skipped:0,done:false};let batch=[],space='',size=0;
+    const progress={task:'push',records:0,files:0,skipped:0,unchanged:0,done:false};let batch=[],space='',size=0;
+    const identity=item=>JSON.stringify(item.type==='data'?['data',item.namespace,item.key]:['file',item.path]);
+    const uploads=new Map();
+    const compare=items=>this.json('push',{action:'check',session:session.session,items});
     const flush=async()=>{
       if(!batch.length)return;
-      await this.json('push',{requestId:crypto.randomUUID(),session:session.session,namespace:space,upsert:batch});
-      progress.records+=batch.length;batch=[];size=0;this.onProgress({...progress});
+      const proposed=await Promise.all(batch.map(async item=>({type:'data',namespace:space,key:item.key,hash:await valueDigest(item.value)})));
+      const result=await compare(proposed);const changed=[];
+      for(let i=0;i<batch.length;i++){
+        const item=batch[i],namespace=space;
+        uploads.set(identity(proposed[i]),async()=>{await this.json('push',{requestId:crypto.randomUUID(),session:session.session,namespace,upsert:[item]});progress.records++;});
+        if(result.items[i].status==='upload')changed.push(item);else progress.unchanged++;
+      }
+      if(changed.length)await this.json('push',{requestId:crypto.randomUUID(),session:session.session,namespace:space,upsert:changed});
+      progress.records+=changed.length;batch=[];size=0;this.onProgress({...progress});
     };
     for await(const item of records){
       const length=new TextEncoder().encode(JSON.stringify(item)).length;
@@ -32,12 +43,34 @@ export class SyncClient {
       space=item.namespace;batch.push({key:item.key,value:item.value});size+=length;
     }
     await flush();
+    let fileBatch=[];let fileBatchSize=0;
+    const upload=async file=>{const result=await this.pushFile(file.path,await file.read(),session.session);if(result.skipped)progress.skipped++;else progress.files++;};
+    const flushFiles=async()=>{
+      if(!fileBatch.length)return;
+      const result=await compare(fileBatch.map(item=>item.manifest));
+      for(let i=0;i<fileBatch.length;i++){
+        const {file,manifest}=fileBatch[i];uploads.set(identity(manifest),()=>upload(file));
+        if(result.items[i].status==='upload')await upload(file);
+        else if(result.items[i].status==='skipped')progress.skipped++;else progress.unchanged++;
+        this.onProgress({...progress});
+      }
+      fileBatch=[];fileBatchSize=0;
+    };
     for await(const file of files){
-      const result=await this.pushFile(file.path,await file.read(),session.session);
-      if(result.skipped)progress.skipped++;else progress.files++;this.onProgress({...progress});
+      // 仅保留小清单和按需读取函数，不将全部文件内容缓存在内存中。
+      const bytes=await file.read();const manifest={type:'file',path:file.path,hash:await bytesDigest(bytes),size:bytes.byteLength};
+      const length=new TextEncoder().encode(JSON.stringify(manifest)).length;
+      if(fileBatch.length&&(fileBatch.length===100||fileBatchSize+length>100000))await flushFiles();
+      fileBatch.push({file,manifest});fileBatchSize+=length;
     }
+    await flushFiles();
     // 任一读取或上传失败都会抛出异常，不能误执行清单缺失删除。
-    await this.json('push',{action:'finish',session:session.session});this.onProgress({...progress,done:true});
+    for(let attempt=0;attempt<Math.ceil(uploads.size/100)+4;attempt++){
+      const result=await this.json('push',{action:'finish',session:session.session});
+      if(result.ok){this.onProgress({...progress,done:true});return;}
+      for(const item of result.upload??[]){const transfer=uploads.get(identity(item));if(!transfer)throw new Error('发布清单缺少本地内容，请重新推送');await transfer();this.onProgress({...progress});}
+    }
+    throw new Error('云端内容持续变化，请稍后重试推送');
   }
 
   async download({scope,full=false,beginFull=async()=>{},putData,deleteData,putFile,deleteFile}){

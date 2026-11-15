@@ -6,6 +6,7 @@ import {getContent} from '../storage/content.js';
 import {syncSettings} from '../sync/settings.js';
 import {requestId,scopeValue} from './input.js';
 import {snapshotStatements,differenceStatement} from './snapshot.js';
+import {heldScope,heldScopeValues,rememberRestored} from './held.js';
 
 async function sessionInfo(env,row){
   const info=await one(env,'SELECT COUNT(*) total, (SELECT marker FROM restore_items WHERE session=? ORDER BY position LIMIT 1) page FROM restore_items WHERE session=?',row.token,row.token);
@@ -22,10 +23,14 @@ async function start(env,device,input){
   try{
     await env.DB.batch([
       stmt(env,`INSERT INTO restore_sessions(token,owner,device,request_id,fingerprint,scope_hash,scope,mode,policy,created,expires)
-        VALUES(?,?,?,?,?,?,?,CASE WHEN ? OR NOT EXISTS(SELECT 1 FROM restore_baselines WHERE device=? AND scope_hash=? AND dirty=0) THEN 'full' ELSE 'delta' END,?,?,?)`,
-        session,device.user_id,device.id,operation,fingerprint,scopeHash,scope,input.full===true?1:0,device.id,scopeHash,policy,now,now+86400000),
+        VALUES(?,?,?,?,?,?,?,CASE WHEN ? OR EXISTS(SELECT 1 FROM restore_baselines WHERE device=? AND scope_hash=? AND dirty=1) THEN 'full'
+          WHEN EXISTS(SELECT 1 FROM restore_baselines WHERE device=? AND scope_hash=? AND dirty=0) OR EXISTS(SELECT 1 FROM device_contents h WHERE h.device=? AND ${heldScope()}) THEN 'delta' ELSE 'full' END,?,?,?)`,
+        session,device.user_id,device.id,operation,fingerprint,scopeHash,scope,input.full===true?1:0,device.id,scopeHash,device.id,scopeHash,device.id,...heldScopeValues(scope),policy,now,now+86400000),
       ...snapshotStatements(env,device,session,scope,policy),
+      stmt(env,`INSERT OR IGNORE INTO restore_known(device,scope_hash,identity,type,namespace,key,path) SELECT ?,?,h.identity,h.type,h.namespace,h.key,h.path FROM device_contents h WHERE h.device=? AND ${heldScope()}`,device.id,scopeHash,device.id,...heldScopeValues(scope)),
       differenceStatement(env,device,session,scopeHash,scope,policy),
+      // 开始应用后，本机可能处于部分完成状态；成功确认时再记录持有内容。
+      stmt(env,`DELETE FROM device_contents AS h WHERE h.device=? AND ${heldScope()}`,device.id,...heldScopeValues(scope)),
       stmt(env,`INSERT OR IGNORE INTO restore_known(device,scope_hash,identity,type,namespace,key,path) SELECT ?,?,identity,type,namespace,key,path FROM restore_snapshots WHERE session=?`,device.id,scopeHash,session),
       stmt(env,`INSERT INTO restore_baselines(device,scope_hash,session,seq,dirty) VALUES(?,?,'',0,1) ON CONFLICT(device,scope_hash) DO UPDATE SET dirty=1`,device.id,scopeHash)
     ]);
@@ -69,7 +74,8 @@ export async function restore(env,device,input){
       stmt(env,`UPDATE restore_baselines SET session=?,seq=?,dirty=0 WHERE device=? AND scope_hash=? AND ${guard}`,row.token,row.seq,device.id,row.scope_hash,row.token),
       stmt(env,`DELETE FROM restore_known WHERE device=? AND scope_hash=? AND ${guard}`,device.id,row.scope_hash,row.token),
       stmt(env,`INSERT OR IGNORE INTO restore_known(device,scope_hash,identity,type,namespace,key,path) SELECT ?,?,identity,type,namespace,key,path FROM restore_snapshots WHERE session=? AND ${guard}`,device.id,row.scope_hash,row.token,row.token),
-      stmt(env,`UPDATE devices SET status='下载成功' WHERE id=? AND ${guard}`,device.id,row.token)
+      stmt(env,`UPDATE devices SET status='下载成功' WHERE id=? AND ${guard}`,device.id,row.token),
+      rememberRestored(env,device,row)
     ]);
     assert(result[0].meta.changes>0,409,'已有较新的下载任务，请重新开始完整下载',{code:'RESTORE_SUPERSEDED'});
     return json({ok:true});

@@ -8,9 +8,10 @@ import devices from '../../migrations/0006_device_config.sql';
 import excluded from '../../migrations/0007_excluded_directories.sql';
 import reset from '../../migrations/0008_factory_reset.sql';
 import generic from '../../migrations/0009_generic_sync.sql';
+import checks from '../../migrations/0010_publish_checks.sql';
 import {MIGRATION_NAMES,repairPlan} from './plan.js';
 
-const migrations=[initial,files,shares,lookup,settings,devices,excluded,reset,generic].map((sql,index)=>({name:MIGRATION_NAMES[index],sql}));
+const migrations=[initial,files,shares,lookup,settings,devices,excluded,reset,generic,checks].map((sql,index)=>({name:MIGRATION_NAMES[index],sql}));
 const readiness=new WeakMap();
 
 async function inspect(db){

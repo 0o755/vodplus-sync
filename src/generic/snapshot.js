@@ -35,9 +35,12 @@ export function differenceStatement(env,device,session,scopeHash,scope,policy){
     difference AS (
       SELECT n.identity,n.type,n.namespace,n.key,n.path,n.value,n.hash,n.size, 'put' op FROM restore_snapshots n LEFT JOIN base b ON b.identity=n.identity
       WHERE n.session=? AND ((SELECT mode FROM restore_sessions WHERE token=?)='full' OR b.identity IS NULL OR n.version<>b.version OR n.value IS NOT b.value OR n.hash IS NOT b.hash)
+      AND ((SELECT mode FROM restore_sessions WHERE token=?)='full' OR NOT EXISTS(
+        SELECT 1 FROM device_contents h JOIN entities e ON e.owner=? AND e.id=h.entity_id AND e.version=h.version AND e.deleted=0 AND e.enabled=1
+        WHERE h.device=? AND h.identity=n.identity AND h.version=n.version AND e.path IS n.path))
       UNION ALL
       SELECT b.identity,b.type,b.namespace,b.key,b.path,NULL,NULL,NULL, 'delete' op FROM restore_known b WHERE b.device=? AND b.scope_hash=? AND NOT EXISTS(SELECT 1 FROM restore_snapshots n WHERE n.session=? AND n.identity=b.identity)
       AND (b.type='data' OR (${allowedFile('b.path')}))
     ) SELECT ?,row_number() OVER(ORDER BY type,identity),lower(hex(randomblob(16))),type,op,namespace,key,path,value,hash,size FROM difference`,
-    device.id,scopeHash,session,session,device.id,scopeHash,session,...policyValues(scope,policy),session);
+    device.id,scopeHash,session,session,session,device.user_id,device.id,device.id,scopeHash,session,...policyValues(scope,policy),session);
 }

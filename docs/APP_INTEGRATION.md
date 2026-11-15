@@ -50,7 +50,11 @@ Authorization: Bearer <device-token>
 | 指定项目推送 | 保存部分记录或文件 | 仅删除请求中明确指定的项目 |
 | 完整发布 | 将所选范围更新为本次备份 | finish 后删除该范围清单中缺失的项目 |
 
-完整发布需要遍历本次全部当前数据，上传时附带发布 session。任意读取或上传失败时，不调用 finish。
+完整发布先遍历当前数据生成摘要清单，批量调用 check，再上传返回 upload 的项目。unchanged 项已经计入清单，不发送正文。上传时附带发布 session。
+
+finish 返回 ok=false 时，按 upload 列表补传后再次确认。任意读取或上传失败时，不将任务标记为完成。摘要函数与校验向量见 [内容摘要](CONTENT_DIGEST.md)。
+
+finish 成功后，持久保存此次推送对应的本地数据缓存。服务端会记录设备已持有的具体项目；后续增量恢复可能省略这些内容，即使恢复 scope 与推送 scope 不同。
 
 文件规则排除项可以跳过。文件上传返回 `skipped: true` 时，将其显示为已跳过，不计为传输失败。
 
@@ -69,7 +73,7 @@ Authorization: Bearer <device-token>
 
 ## JavaScript SDK
 
-参考实现位于 [examples/sync-v2-client.js](../examples/sync-v2-client.js)，支持浏览器和具备 Fetch API 的 JavaScript 环境。
+参考实现位于 [examples/sync-v2-client.js](../examples/sync-v2-client.js)，支持浏览器和具备 Fetch API 的 JavaScript 环境。使用时同时引入其内容摘要模块，或通过构建工具打包。
 
 ### 创建客户端
 
@@ -85,7 +89,7 @@ const sync = new SyncClient({
 });
 ```
 
-`onProgress` 返回任务类型和累计进度。界面可以在同一行更新状态。
+`onProgress` 返回任务类型和累计进度，包括已上传的 records、files，内容一致的 unchanged 和规则排除的 skipped。界面可以在同一行更新状态。
 
 ### 完整推送
 
@@ -169,4 +173,5 @@ SDK 完整任务重新调用会创建一个新会话。需要精确续传时，�
 - 完整发布只删除所选范围内的缺失项目。
 - 其他应用的命名空间及文件规则排除项保持不变。
 - 下载失败、写入失败和应用中断不会确认成功。
+- 完全一致的重复推送不发送记录正文和文件内容；只修改一项时只上传该项。
 - 成功恢复后，再次下载只获取服务端计算出的变化。

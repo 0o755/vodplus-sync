@@ -43,6 +43,10 @@ export async function pushFile(env,request,url,device){
       WHERE entities.path<>excluded.path OR entities.data<>excluded.data OR entities.deleted<>0 OR entities.enabled<>1 OR entities.kind<>excluded.kind`,owner,owner,`device:${device.id}`,Date.now(),encoded,...receiptValues(device,operation,nonce)));
   }
   if(scope&&!deleting)batch.push(stmt(env,`INSERT OR IGNORE INTO publish_items(session,identity) SELECT ?,json_array('file',?) WHERE ${receiptGuard}`,session,path,...receiptValues(device,operation,nonce)));
+  if(scope)batch.push(deleting
+    ?stmt(env,`DELETE FROM publish_checks WHERE session=? AND identity=json_array('file',?) AND ${receiptGuard}`,session,path,...receiptValues(device,operation,nonce))
+    :stmt(env,`UPDATE publish_checks SET hash=?,size=?,entity_id=(SELECT id FROM entities WHERE owner=? AND path=? AND deleted=0),version=(SELECT version FROM entities WHERE owner=? AND path=? AND deleted=0)
+      WHERE session=? AND identity=json_array('file',?) AND ${receiptGuard}`,hash,content.length,owner,path,owner,path,session,path,...receiptValues(device,operation,nonce)));
   await env.DB.batch(batch);
   if(scope)await publishing(env,device,session);
   const published=await receipt(env,device,operation,fingerprint);

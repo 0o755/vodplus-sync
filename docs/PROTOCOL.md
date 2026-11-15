@@ -98,8 +98,9 @@ Content-Type: application/json
 ```json
 {
   "ok": true,
-  "requiredSchema": 9,
+  "requiredSchema": 10,
   "syncApi": 2,
+  "capabilities": ["push-check","device-held-content"],
   "automaticMigration": true,
   "code": "OK",
   "missingMigrations": []

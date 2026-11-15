@@ -16,6 +16,7 @@ export async function maintenance(env) {
     env.DB.prepare(`DELETE FROM restore_sessions WHERE token IN (${expired})`).bind(now)
   ]);
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM publish_checks WHERE session IN (SELECT token FROM publish_sessions WHERE expires<?)').bind(now),
     env.DB.prepare('DELETE FROM publish_items WHERE session IN (SELECT token FROM publish_sessions WHERE expires<?)').bind(now),
     env.DB.prepare('DELETE FROM publish_sessions WHERE expires<?').bind(now)
   ]);

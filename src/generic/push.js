@@ -4,6 +4,7 @@ import {digest} from '../lib/crypto.js';
 import {one,stmt} from '../lib/db.js';
 import {namespace,dataKey,requestId} from './input.js';
 import {publishing,publicationGuard} from './publication.js';
+import {valueDigest} from '../lib/content-digest.js';
 
 export async function receipt(env,device,operation,fingerprint){
   const row=await one(env,'SELECT fingerprint,result FROM receipts WHERE principal=? AND op_id=?',`v2:${device.id}`,operation);
@@ -28,7 +29,8 @@ export async function pushData(env,device,input){
     assert(item.deleted||item.value!==undefined,400,'缺少记录内容');
     const value=JSON.stringify({namespace:space,key,value:item.deleted?null:item.value});
     assert(new TextEncoder().encode(value).length<=16384,413,'单条记录超过 16 KiB');
-    rows.push({id:'record_'+await digest(JSON.stringify([space,key])),data:value,deleted:item.deleted});
+    let hash=null;if(!item.deleted&&input.session){try{hash=await valueDigest(item.value);}catch{assert(false,400,'JSON 内容不能生成有效摘要');}}
+    rows.push({id:'record_'+await digest(JSON.stringify([space,key])),key,data:value,hash,deleted:item.deleted});
   }
   const fingerprint=await digest(JSON.stringify(['data',input]));
   const previous=await receipt(env,device,operation,fingerprint);if(previous)return json(previous);
@@ -44,6 +46,14 @@ export async function pushData(env,device,input){
       WHERE entities.data<>excluded.data OR entities.deleted<>excluded.deleted OR entities.enabled<>1`,owner,`device:${device.id}`,now,encoded,...receiptValues(device,operation,nonce))
   ];
   if(scope)batch.push(stmt(env,`INSERT OR IGNORE INTO publish_items(session,identity) SELECT ?,json_array('data',?,json_extract(j.value,'$.key')) FROM json_each(?) j WHERE ${receiptGuard}`,input.session,space,JSON.stringify(upsert),...receiptValues(device,operation,nonce)));
+  if(scope)batch.push(
+    stmt(env,`INSERT INTO publish_checks(session,identity,type,namespace,key,hash,entity_id,version)
+      SELECT ?,json_array('data',?,json_extract(j.value,'$.key')),'data',?,json_extract(j.value,'$.key'),json_extract(j.value,'$.hash'),e.id,e.version
+      FROM json_each(?) j JOIN entities e ON e.owner=? AND e.id=json_extract(j.value,'$.id')
+      WHERE json_extract(j.value,'$.deleted')=0 AND EXISTS(SELECT 1 FROM publish_checks c WHERE c.session=? AND c.identity=json_array('data',?,json_extract(j.value,'$.key'))) AND ${receiptGuard}
+      ON CONFLICT(session,identity) DO UPDATE SET hash=excluded.hash,entity_id=excluded.entity_id,version=excluded.version`,input.session,space,space,encoded,owner,input.session,space,...receiptValues(device,operation,nonce)),
+    stmt(env,`DELETE FROM publish_checks WHERE session=? AND identity IN(SELECT json_array('data',?,value) FROM json_each(?)) AND ${receiptGuard}`,input.session,space,JSON.stringify(remove),...receiptValues(device,operation,nonce))
+  );
   await env.DB.batch(batch);
   if(scope)await publishing(env,device,input.session);
   const saved=await receipt(env,device,operation,fingerprint);assert(saved,413,'用户空间已达记录容量上限');return json(saved);

@@ -107,6 +107,6 @@ test('空数据库可自动初始化，普通访问不会执行重置触发器�
   const migrations=await Promise.all(MIGRATION_NAMES.map(async name=>({name,sql:await readFile(new URL('../migrations/'+name,import.meta.url),'utf8')})));
   const plan=repairPlan(migrations,{names:new Set(),columns:new Set(),applied:new Set(),hasSettings:false});
   assert.ok(plan.every(sql=>!/^(DELETE|DROP)\b/i.test(sql)));
-  assert.equal(plan.filter(sql=>sql.startsWith('CREATE TRIGGER')).length,4);
-  assert.ok(plan.length<=45,'首次请求的迁移语句为正常路由保留 D1 查询额度');
+  assert.equal(plan.filter(sql=>sql.startsWith('CREATE TRIGGER')).length,5);
+  assert.ok(plan.length<=47,'首次状态请求的迁移语句保留 D1 查询额度');
 });
