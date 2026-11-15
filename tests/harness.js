@@ -1,0 +1,40 @@
+// 使用真实 workerd、D1 SQLite 和 R2 模拟器，避免用内存对象代替事务测试。
+import { Miniflare } from 'miniflare';
+import { build } from 'esbuild';
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+export const secret='test-only-bootstrap-secret-not-for-deployment';
+export const digest=value=>createHash('sha256').update(value).digest('hex');
+export async function createHarness({assets=false}={}){
+  const bundle=await build({entryPoints:['src/worker.js'],bundle:true,write:false,format:'esm',platform:'browser'});
+  const staticFiles=new Map();
+  if(assets){
+    const files=['index.html','styles.css','app.js','ui.js','share.html','share.js','deploy.html','deploy.js','pages/overview.js','pages/people.js','pages/files.js','pages/file-editor.js','pages/revisions.js'];
+    for(const file of files)staticFiles.set('/'+file,await readFile(new URL('../web/'+file,import.meta.url)));
+  }
+  const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',d1Databases:['DB'],r2Buckets:['BUCKET'],bindings:{BOOTSTRAP_SECRET:secret},serviceBindings:{ASSETS:request=>{
+    const path=new URL(request.url).pathname;const file=path==='/'?'/index.html':path;
+    return staticFiles.has(file)?new Response(staticFiles.get(file),{headers:{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html; charset=utf-8'}}):new Response('Not found',{status:404});
+  }}});
+  const db=await mf.getD1Database('DB');
+  const sql=(await readFile(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
+  const triggers=[...sql.matchAll(/CREATE TRIGGER[\s\S]*?END;/g)].map(m=>m[0]);
+  for(const statement of sql.replace(/CREATE TRIGGER[\s\S]*?END;/g,'').split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+  for(const trigger of triggers)await db.prepare(trigger).run();
+  let cookie='';
+  const request=async(path,{method='GET',data,token,admin=true,raw,headers={}}={})=>{
+    const response=await mf.dispatchFetch('http://localhost'+path,{method,headers:{...(admin&&cookie?{cookie}:{}),...(token?{authorization:`Bearer ${token}`} : {}),...(data?{'content-type':'application/json'}:{}),...headers},body:data?JSON.stringify(data):raw});
+    const text=await response.text();let value;try{value=JSON.parse(text);}catch{value=text;}
+    return {status:response.status,value,headers:response.headers};
+  };
+  const setup=await request('/api/setup',{method:'POST',data:{secret,username:'admin',password:'test-password-1234'}});
+  if(setup.status!==200)throw new Error(JSON.stringify(setup.value));cookie=setup.headers.get('set-cookie').split(';')[0];
+  const createUser=async name=>(await request('/api/admin/users',{method:'POST',data:{name}})).value.id;
+  const bind=async(userId,username)=>{const code=(await request(`/api/admin/users/${userId}/binding`,{method:'POST',data:{}})).value.code;return (await request('/api/bind',{method:'POST',admin:false,data:{code,username,deviceName:'测试设备'}})).value;};
+  const put=async(owner,path,text='print("hello")',extra={})=>{
+    const hash=digest(text);await request(`/api/admin/spaces/${owner}/blobs/${hash}`,{method:'PUT',raw:text});
+    const patch={id:crypto.randomUUID(),kind:'file',path,baseVersion:0,data:{hash,size:Buffer.byteLength(text)},...extra};
+    return {patch,result:await request(`/api/admin/spaces/${owner}/commit`,{method:'POST',data:{opId:crypto.randomUUID(),patch}})};
+  };
+  return {mf,db,request,createUser,bind,put,dispose:()=>mf.dispose()};
+}

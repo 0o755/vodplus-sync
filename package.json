@@ -1,0 +1,37 @@
+{
+  "name": "vodplus-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare 爬虫管理与人物数据同步平台",
+  "engines": {
+    "node": ">=22"
+  },
+  "cloudflare": {
+    "bindings": {
+      "BOOTSTRAP_SECRET": {
+        "description": "首次初始化管理员所需的随机密钥，至少 32 位；不能留空或使用示例值。初始化完成后可删除。"
+      },
+      "DB": {
+        "description": "人物、设备、版本及同步记录。部署脚本自动迁移。"
+      },
+      "BUCKET": {
+        "description": "文件内容存储；需在 Cloudflare 账户启用 R2。"
+      }
+    }
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "check": "node scripts/check.mjs",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "node scripts/deploy.mjs",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote": "wrangler d1 migrations apply DB --remote"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "wrangler": "4.162.0"
+  }
+}

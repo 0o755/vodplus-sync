@@ -1,0 +1,63 @@
+// 管理员、设备和只读分享互不复用凭证；首次初始化必须持有部署密钥。
+import { assert, body, json, name } from './lib/http.js';
+import { digest, equal, password, token, verify } from './lib/crypto.js';
+import { one, run } from './lib/db.js';
+
+export async function throttle(env, request, scope, limit = 15) {
+  const key = await digest(`${scope}:${request.headers.get('cf-connecting-ip') || 'local'}`); const now = Date.now();
+  const row = await env.DB.prepare('INSERT INTO rate_limits(key,count,expires) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN expires<? THEN 1 ELSE count+1 END, expires=CASE WHEN expires<? THEN excluded.expires ELSE expires END RETURNING count').bind(key, now + 600000, now, now).first();
+  assert(row.count <= limit, 429, '尝试过于频繁，请十分钟后重试');
+}
+export function origin(request) {
+  const from = request.headers.get('origin');
+  assert(!from || from === new URL(request.url).origin, 403, '不接受跨站操作');
+}
+export async function admin(env, request) {
+  origin(request);
+  const raw = request.headers.get('cookie')?.match(/(?:^|; )vp_session=([a-f0-9]{64})(?:;|$)/)?.[1];
+  assert(raw && await one(env, 'SELECT hash FROM sessions WHERE hash=? AND expires>?', await digest(raw), Date.now()), 401, '请登录管理后台');
+}
+export async function device(env, request) {
+  const raw = request.headers.get('authorization')?.replace(/^Bearer /, '');
+  assert(raw && /^[a-f0-9]{64}$/.test(raw), 401, '设备凭证无效');
+  const row = await one(env, 'SELECT d.* FROM devices d JOIN users u ON u.id=d.user_id WHERE d.token_hash=? AND d.revoked=0 AND u.enabled=1', await digest(raw));
+  assert(row, 401, '设备已撤销或用户已停用');
+  await run(env, 'UPDATE devices SET last_seen=? WHERE id=?', Date.now(), row.id);
+  return row;
+}
+function cookie(request, value, age) { return `vp_session=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${new URL(request.url).protocol === 'https:' ? '; Secure' : ''}`; }
+export async function authRoute(env, request, path) {
+  if (path === '/api/status' && request.method === 'GET') return json({ initialized: !!await one(env, 'SELECT id FROM administrators'), setupAvailable: !!env.BOOTSTRAP_SECRET });
+  if (path === '/api/logout' && request.method === 'POST') {
+    await admin(env, request);
+    const raw = request.headers.get('cookie').match(/vp_session=([a-f0-9]{64})/)[1];
+    await run(env, 'DELETE FROM sessions WHERE hash=?', await digest(raw));
+    return json({ ok: true }, 200, { 'set-cookie': cookie(request, '', 0) });
+  }
+  if (!['/api/setup','/api/login','/api/bind'].includes(path) || request.method !== 'POST') return null;
+  origin(request); await throttle(env, request, path); const input = await body(request);
+  if (path === '/api/bind') {
+    const credential = token(); const deviceId = crypto.randomUUID(); const now = Date.now();
+    const hash = await digest(String(input.code));
+    // 设备创建与绑定码消费在同一事务内，失败不会烧掉绑定码。
+    const username = name(input.username); const deviceName = name(input.deviceName);
+    const results = await env.DB.batch([
+      env.DB.prepare('INSERT INTO devices(id,user_id,name,token_hash,last_seen) SELECT ?,user_id,?,?,? FROM bindings WHERE hash=? AND consumed=0 AND expires>? AND user_id=(SELECT id FROM users WHERE name=? AND enabled=1)').bind(deviceId, deviceName, await digest(credential), now, hash, now, username),
+      env.DB.prepare('UPDATE bindings SET consumed=1 WHERE hash=? AND EXISTS(SELECT 1 FROM devices WHERE id=?)').bind(hash, deviceId)
+    ]);
+    assert(results[0].meta.changes === 1, 401, '用户名或绑定码错误，或绑定码已过期');
+    const row = await one(env, 'SELECT user_id FROM devices WHERE id=?', deviceId);
+    return json({ deviceId, userId: row.user_id, token: credential }, 201);
+  }
+  assert(typeof input.password === 'string' && input.password.length >= 12 && input.password.length <= 200, 400, '密码需要 12–200 个字符');
+  if (path === '/api/setup') {
+    assert(env.BOOTSTRAP_SECRET?.length >= 32 && equal(input.secret, env.BOOTSTRAP_SECRET), 403, '初始化密钥错误或未配置');
+    const result = await run(env, 'INSERT OR IGNORE INTO administrators(id,username,password) VALUES(1,?,?)', name(input.username), await password(input.password));
+    assert(result.meta.changes === 1, 409, '管理员已经初始化');
+  } else {
+    const user = await one(env, 'SELECT * FROM administrators WHERE id=1');
+    assert(user && equal(input.username, user.username) && await verify(input.password, user.password), 401, '用户名或密码错误');
+  }
+  const session = token(); await run(env, 'INSERT INTO sessions(hash,expires) VALUES(?,?)', await digest(session), Date.now() + 43200000);
+  return json({ ok: true }, 200, { 'set-cookie': cookie(request, session, 43200) });
+}

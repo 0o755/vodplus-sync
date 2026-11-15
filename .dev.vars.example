@@ -1,0 +1,2 @@
+# 部署前替换为至少 32 位随机值；首次初始化后可删除此 Secret。
+BOOTSTRAP_SECRET=

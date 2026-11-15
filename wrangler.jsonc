@@ -1,0 +1,12 @@
+{
+  // D1 和 R2 省略资源 ID，由 Wrangler 部署时创建或绑定。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vodplus-sync",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-07-30",
+  "assets": { "directory": "./web", "binding": "ASSETS", "run_worker_first": true },
+  "d1_databases": [{ "binding": "DB", "database_name": "vodplus-sync", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "vodplus-sync-files" }],
+  "observability": { "enabled": false },
+  "triggers": { "crons": ["17 3 * * *"] }
+}
