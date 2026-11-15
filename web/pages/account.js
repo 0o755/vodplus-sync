@@ -7,14 +7,14 @@ export async function showAccount(onSignedOut){
     {name:'currentPassword',label:'当前密码',type:'password',autocomplete:'current-password'},
     {name:'newPassword',label:'新密码',type:'password',min:5,hint:'至少 5 位。修改后所有后台登录会话都需要重新登录。'},
     {name:'repeatPassword',label:'再次输入新密码',type:'password',min:5},
-    {html:'<div class="account-danger"><strong>恢复初始状态</strong><p>清空管理员、用户、设备、文件、历史和配置，重新从零开始。</p><button type="button" class="danger" id="open-reset">清空全部数据并重置</button></div>'}
+    {html:'<div class="account-danger"><strong>服务维护</strong><p>需要重新从零开始时，可进入左侧“服务重置”菜单。</p><button type="button" id="open-reset">打开服务重置</button></div>'}
   ],'修改密码',{submit:input=>{if(input.newPassword!==input.repeatPassword)throw new Error('两次输入的新密码不一致');return send('/api/admin/account/password',{currentPassword:input.currentPassword,newPassword:input.newPassword});}});
   $('#open-reset').onclick=()=>{reset=true;$('#modal').close('cancel');};
   const result=await pending;
   if(result){toast('密码已修改，请重新登录');await onSignedOut();}
-  if(reset)await showReset(onSignedOut);
+  if(reset)location.hash='reset';
 }
-async function showReset(onSignedOut){
+export async function showReset(onSignedOut){
   const result=await form('清空全部数据并重置',[
     {html:'<p class="error-text">将删除全部管理员、用户、设备授权、文件及历史版本、分享接口、同步记录和自定义规则。此操作不能从后台撤销。</p>'},
     {name:'currentPassword',label:'当前管理员密码',type:'password',autocomplete:'current-password'},
@@ -24,6 +24,6 @@ async function showReset(onSignedOut){
 }
 export async function showLoginHelp(){
   await form('账号与重置说明',[
-    {html:'<p>重新部署会保留原 D1 数据。显示登录页表示数据库已有管理员，不会自动恢复为初始状态。</p><p>可在 Cloudflare 的 D1 控制台先查询账号：</p><textarea readonly rows="2">SELECT username FROM administrators;</textarea><p>如果忘记密码且确认要清空所有数据，先确认已部署包含恢复初始状态功能的版本，再在该 Worker 绑定的 D1 控制台执行：</p><textarea readonly rows="2">INSERT INTO maintenance_actions(action) VALUES(\'factory_reset\');</textarea><p class="error-text">这条命令会清空所有业务数据和管理员。执行前应先备份；完成后重新打开页面创建管理员。</p>'}
+    {html:'<p>重新部署会保留原 D1 数据。显示登录页表示数据库已有管理员，请使用原账号和密码登录；本服务没有默认 admin 密码。</p><p>登录后，左侧“服务重置”菜单可直接清空数据并重新初始化，右上角头像可修改管理员密码，均通过网页操作。</p><p>如果确实忘记原账号密码，需要先由服务所有者恢复管理员访问权限；未登录的访客不能清空服务数据。</p>'}
   ],'知道了');
 }

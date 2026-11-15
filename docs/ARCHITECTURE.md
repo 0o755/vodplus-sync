@@ -52,7 +52,7 @@ D1 的 `entities` 保存文件、目录、history、progress、search、config �
 
 ## 管理员恢复与诊断
 
-`account.js` 提供改密和主动重置。改密使用旧密码摘要比较更新，并使所有登录会话失效。`maintenance_actions` 的 factory_reset 触发器在单个事务中清空业务表并恢复默认同步规则，保留结构和迁移记录。公开访问不能触发重置；忘记密码由 Cloudflare 账户持有者在 D1 控制台操作。
+`account.js` 提供改密和主动重置。改密使用旧密码摘要比较更新，并使所有登录会话失效。`maintenance_actions` 的 factory_reset 触发器在单个事务中清空业务表并恢复默认同步规则，保留结构和迁移记录。登录后的“服务重置”独立菜单调用该接口，公开访问不能触发重置。
 
 `/api/health` 仅检查公开表结构，不返回用户数据。内部错误返回诊断码与请求编号；日志不打印完整 URL、SQL、令牌、设备码或密码。观察到 HTTP 500 不等于已经确认迁移缺失。
 

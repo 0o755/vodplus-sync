@@ -23,6 +23,12 @@
 
 Cloudflare 可能要求新建 Git 仓库；如果名称与已有仓库冲突，可以改成 `vodplus-sync-deploy`。部署副本不会自动跟随上游更新，后续需要同步修复代码。
 
+## 确认构建使用最新代码
+
+在 Cloudflare 的构建详情核对完整仓库名 `0o755/vodplus-sync`、生产分支 `main` 和对应提交。旧失败记录仍然保留旧日志，不代表最新源码恢复了 R2。部署副本与原仓库是独立的，必须同步更新或重新连接原仓库。
+
+新部署脚本会打印 `[VodPlus Sync] source=<实际提交>; storage=D1-only; R2=disabled`；实际绑定应仅出现 DB 与 ASSETS，不出现 BUCKET。构建和部署命令仍分别是 `npm run build`、`npm run deploy`，这是 Cloudflare 网页中的构建配置，无需用户在终端运行。
+
 ## 已经遇到 R2 10085 错误
 
 这是旧版配置声明了不存在的存储桶造成的。当前修复已取消 R2 依赖：

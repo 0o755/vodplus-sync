@@ -10,7 +10,7 @@ export async function createHarness({assets=false,setup=true}={}){
   const staticFiles=new Map();
   if(assets){
     const files=['index.html','styles.css','app.js','ui.js','icons.js','share.html','share.js','deploy.html','deploy.js','lib/binding-links.js','lib/files-api.js','lib/upload-plan.js','pages/binding.js','pages/sync-settings.js','pages/overview.js','pages/shares.js','pages/people.js','pages/device-config.js','pages/files.js','pages/file-editor.js','pages/file-actions.js','pages/uploads.js','pages/revisions.js'];
-    files.push('lib/file-types.js','lib/file-list.js','pages/account.js',...FILE_ICON_ASSETS);
+    files.push('lib/file-types.js','lib/file-list.js','pages/account.js','pages/service-reset.js',...FILE_ICON_ASSETS);
     for(const file of files)staticFiles.set('/'+file,await readFile(new URL('../web/'+file,import.meta.url)));
   }
   const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',d1Databases:['DB'],serviceBindings:{ASSETS:request=>{

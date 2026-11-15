@@ -5,7 +5,8 @@ import {overview} from './pages/overview.js';
 import {usersPage,devicesPage} from './pages/people.js';
 import {filesPage} from './pages/files.js';
 import {showAccount,showLoginHelp} from './pages/account.js';
-const nav=[['overview','概览','overview'],['users','用户管理','users'],['files','爬虫管理','folder'],['devices','设备管理','devices']];
+import {serviceResetPage} from './pages/service-reset.js';
+const nav=[['overview','概览','overview'],['users','用户管理','users'],['files','爬虫管理','folder'],['devices','设备管理','devices'],['reset','服务重置','refresh']];
 let active='overview';let data;
 async function login(){
   cleanupPage();
@@ -29,7 +30,7 @@ async function render(){
   on('#account','click',()=>showAccount(login));on('#account-top','click',()=>showAccount(login));
   on('#logout','click',async()=>{if(canLeave()){await send('/api/logout');setUnsaved(false);await login();}});
   document.querySelectorAll('a[href^="#"]').forEach(link=>link.addEventListener('click',event=>{if(!canLeave())event.preventDefault();}));
-  await ({overview,users:usersPage,devices:devicesPage,files:filesPage}[active])({data,reload:load});
+  await ({overview,users:usersPage,devices:devicesPage,files:filesPage,reset:serviceResetPage}[active])({data,reload:load,onReset:async()=>{active='overview';history.replaceState(null,'','#overview');await login();}});
 }
 window.addEventListener('hashchange',()=>{const key=location.hash.slice(1).split('?')[0];if(nav.some(n=>n[0]===key)){active=key;load().catch(e=>toast(e.message,true));}});
 active=nav.some(n=>n[0]===location.hash.slice(1).split('?')[0])?location.hash.slice(1).split('?')[0]:'overview';

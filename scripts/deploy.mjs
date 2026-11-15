@@ -3,6 +3,7 @@ import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import { parse, printParseErrorCode } from 'jsonc-parser';
 import { createWrangler } from './deploy/wrangler.mjs';
 import { provisionDatabase } from './deploy/database.mjs';
@@ -32,5 +33,7 @@ export async function deployProject({ root = fileURLToPath(new URL('../', import
   }
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  let revision='local';try{revision=execFileSync('git',['rev-parse','--short','HEAD'],{cwd:fileURLToPath(new URL('../',import.meta.url)),encoding:'utf8',shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']}).trim();}catch{}
+  console.log(`[VodPlus Sync] source=${revision}; storage=D1-only; R2=disabled`);
   Promise.resolve().then(buildStyles).then(()=>deployProject()).catch(error => { console.error(`部署停止：${error.message}`); process.exitCode = 1; });
 }
