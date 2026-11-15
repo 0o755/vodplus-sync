@@ -8,12 +8,16 @@ import { maintenance } from './maintenance.js';
 import {adminDeviceConfigRoute,syncDeviceConfigRoute} from './devices/routes.js';
 import {accountRoute} from './account.js';
 import {health,failureCode} from './diagnostics.js';
+import {ensureSchema} from './schema/ensure.js';
 
 export default {
-  async scheduled(_event, env) { await maintenance(env); },
+  async scheduled(_event, env) { await ensureSchema(env);await maintenance(env); },
   async fetch(request, env) {
     try {
-      const url = new URL(request.url); let response = url.pathname==='/api/health'&&request.method==='GET'?await health(env):await authRoute(env, request, url.pathname);
+      const url = new URL(request.url);
+      const healthRequest=url.pathname==='/api/health'&&request.method==='GET';
+      if(!healthRequest&&(url.pathname.startsWith('/api/')||url.pathname.startsWith('/share/')))await ensureSchema(env);
+      let response = healthRequest?await health(env):await authRoute(env, request, url.pathname);
       if (!response && url.pathname.startsWith('/api/admin/')) {
         await admin(env, request);
         response = await accountRoute(env,request,url) || await adminDeviceConfigRoute(env,request,url) || await adminRoute(env, request, url) || await manageShare(env, request, url);
@@ -35,7 +39,7 @@ export default {
         const path=new URL(request.url).pathname;
         const operation=path.startsWith('/api/sync/')?'sync':path.startsWith('/api/admin/')?'admin':path.startsWith('/share/')?'share':'other';
         console.error(JSON.stringify({event:'request_failed',requestId,operation,code}));
-        return secure(json({error:code==='SCHEMA_NOT_READY'?'数据库结构未更新，请执行部署迁移':code==='DATABASE_LIMIT'?'数据库额度或容量已达限制':'服务暂时不可用',detail:{code,requestId}},500));
+        return secure(json({error:code==='SCHEMA_NOT_READY'?'服务数据准备失败，请稍后重试':code==='DATABASE_LIMIT'?'数据库额度或容量已达限制':'服务暂时不可用',detail:{code,requestId}},500));
       }
       return secure(json({ error: status === 500 ? '服务暂时不可用，请检查数据库迁移和资源绑定' : error.message, detail: error.detail }, status, status === 503 && error.detail?.retryable ? { 'retry-after': '1' } : {}));
     }

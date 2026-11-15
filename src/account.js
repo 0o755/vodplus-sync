@@ -3,6 +3,7 @@ import {assert,body,json} from './lib/http.js';
 import {one,run} from './lib/db.js';
 import {password,verify} from './lib/crypto.js';
 import {throttle} from './auth.js';
+import {ensureSchema} from './schema/ensure.js';
 function signedOut(request){return {'set-cookie':`vp_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${new URL(request.url).protocol==='https:'?'; Secure':''}`};}
 async function currentAdmin(env,input){
   assert(typeof input.currentPassword==='string'&&input.currentPassword.length<=200,400,'请填写当前管理员密码');
@@ -26,6 +27,8 @@ export async function accountRoute(env,request,url){
     return json({ok:true,relogin:true},200,signedOut(request));
   }
   assert(input.confirmation==='RESET',400,'请输入 RESET 确认清空全部数据');
+  // 重置前重新检查，兼容旧库漏迁移或运行期间缺表，不要求用户手动升级。
+  await ensureSchema(env,{force:true});
   const result=await run(env,"INSERT INTO maintenance_actions(action) SELECT 'factory_reset' FROM administrators WHERE id=1 AND password=?",admin.password);
   assert(result.meta.changes>0,409,'管理员信息已变化，未执行重置');
   return json({ok:true,initialized:false},200,signedOut(request));
