@@ -10,9 +10,10 @@ import reset from '../../migrations/0008_factory_reset.sql';
 import generic from '../../migrations/0009_generic_sync.sql';
 import checks from '../../migrations/0010_publish_checks.sql';
 import indexes from '../../migrations/0011_query_indexes.sql';
+import summaries from '../../migrations/0012_sync_summaries.sql';
 import {MIGRATION_NAMES,repairPlan} from './plan.js';
 
-const migrations=[initial,files,shares,lookup,settings,devices,excluded,reset,generic,checks,indexes].map((sql,index)=>({name:MIGRATION_NAMES[index],sql}));
+const migrations=[initial,files,shares,lookup,settings,devices,excluded,reset,generic,checks,indexes,summaries].map((sql,index)=>({name:MIGRATION_NAMES[index],sql}));
 const readiness=new WeakMap();
 
 async function inspect(db){
@@ -29,11 +30,13 @@ async function inspect(db){
 
 async function repair(db){
   for(let attempt=0;attempt<3;attempt++){
-    const plan=repairPlan(migrations,await inspect(db));
-    if(!plan.length)return;
+    const state=await inspect(db);const plan=repairPlan(migrations,state);
+    if(!plan.length)return true;
+    // 空库先完成账号/状态所需结构，下一次 API 补齐其余模块，避免单请求超过免费查询次数。
+    const bootstrap=!state.names.has('administrators')&&plan.length>40;
     try{
       // DDL、默认行及迁移记录一起提交，失败时整体回滚，不留下半升级结构。
-      await db.batch(plan.map(sql=>db.prepare(sql)));return;
+      await db.batch((bootstrap?plan.slice(0,40):plan).map(sql=>db.prepare(sql)));return !bootstrap;
     }catch(error){
       // 不同 Worker 实例可能同时补列；另一实例已完成时重新检查即可。
       if(attempt===2||!/duplicate column name|already exists/i.test(String(error?.message)))throw error;
@@ -44,8 +47,9 @@ async function repair(db){
 export function ensureSchema(env,{force=false}={}){
   const previous=readiness.get(env.DB);
   if(previous&&!force)return previous;
-  const task=(async()=>{if(previous)await previous;await repair(env.DB);})();
+  const task=(async()=>{if(previous)await previous;return repair(env.DB);})();
   readiness.set(env.DB,task);
+  task.then(complete=>{if(!complete&&readiness.get(env.DB)===task)readiness.delete(env.DB);},()=>{});
   task.catch(()=>{if(readiness.get(env.DB)===task)readiness.delete(env.DB);});
   return task;
 }

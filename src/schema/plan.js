@@ -2,13 +2,13 @@
 export const MIGRATION_NAMES=[
   '0001_initial.sql','0002_d1_files.sql','0003_permanent_shares.sql','0004_sync_lookup.sql',
   '0005_sync_settings.sql','0006_device_config.sql','0007_excluded_directories.sql','0008_factory_reset.sql',
-  '0009_generic_sync.sql','0010_publish_checks.sql','0011_query_indexes.sql'
+  '0009_generic_sync.sql','0010_publish_checks.sql','0011_query_indexes.sql','0012_sync_summaries.sql'
 ];
 
 export function statements(sql){
   // 触发器中的分号属于同一条语句，不能拆开执行其中的清空指令。
   const triggers=[];
-  const text=sql.replace(/^--.*$/gm,'').replace(/CREATE TRIGGER[\s\S]*?END;/g,trigger=>`__TRIGGER_${triggers.push(trigger)-1}__;`);
+  const text=sql.replace(/^--.*$/gm,'').replace(/CREATE TRIGGER[\s\S]*?^END;/gm,trigger=>`__TRIGGER_${triggers.push(trigger)-1}__;`);
   return text.split(';').map(part=>part.trim()).filter(Boolean).map(part=>{
     const match=part.match(/^__TRIGGER_(\d+)__$/);return match?triggers[Number(match[1])]:part;
   });

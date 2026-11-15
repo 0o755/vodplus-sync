@@ -7,6 +7,7 @@ import {allowedFile,policyValues} from './snapshot.js';
 import {syncSettings} from '../sync/settings.js';
 import {pendingChecks,pendingValues,checkIdentity} from './check.js';
 import {rememberPublished} from './held.js';
+import {rememberPushSummary} from './summary.js';
 
 export async function publishing(env,device,session){
   if(session===undefined||session===null)return null;
@@ -41,8 +42,10 @@ export async function publication(env,device,input,attempt=0){
       AND ${allowedFile('entities.path')}
       AND NOT EXISTS(SELECT 1 FROM publish_items WHERE session=? AND identity=json_array('file',entities.path))
       AND ${ready}`,source,now,device.user_id,row.scope,...policyValues(row.scope,policy),row.token,...readyValues),
-    stmt(env,`UPDATE publish_sessions SET finished=1 WHERE token=? AND ${ready}`,row.token,...readyValues),
-    ...rememberPublished(env,device,row,policy)
+    stmt(env,`UPDATE publish_sessions SET finished=2 WHERE token=? AND ${ready}`,row.token,...readyValues),
+    ...rememberPublished(env,device,row,policy),
+    rememberPushSummary(env,device,row,currentPolicy.revision),
+    stmt(env,'UPDATE publish_sessions SET finished=1 WHERE token=? AND finished=2',row.token)
   ]);
   if(!result[2].meta.changes){
     if((await one(env,'SELECT finished FROM publish_sessions WHERE token=?',row.token)).finished)return json({ok:true});

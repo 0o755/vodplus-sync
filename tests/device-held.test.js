@@ -50,6 +50,8 @@ test('未完成恢复不会错误保留持有状态，完整推送确认后可�
   const h=await fixture();try{
     await h.push();const interrupted=(await h.start(fileScope)).value;
     assert.equal(interrupted.total,0);
+    const emptyRetry=(await h.start(fileScope)).value;assert.equal(emptyRetry.mode,'delta');assert.equal(emptyRetry.total,0);
+    await h.start(fileScope,{full:true});
     const retry=(await h.start(fileScope)).value;assert.equal(retry.mode,'full');assert.equal(retry.total,1);
     await h.push();const afterPush=(await h.start(fileScope)).value;assert.equal(afterPush.mode,'delta');assert.equal(afterPush.total,0);
     const explicit=(await h.start(dataScope,{full:true})).value;assert.equal(explicit.mode,'full');assert.equal(explicit.total,1);

@@ -9,7 +9,7 @@ export function heldScope(alias='h'){
 }
 export const heldScopeValues=scope=>[scope,scope,scope];
 export function rememberPublished(env,device,row,policy){
-  const complete='EXISTS(SELECT 1 FROM publish_sessions WHERE token=? AND finished=1)';
+  const complete='EXISTS(SELECT 1 FROM publish_sessions WHERE token=? AND finished=2)';
   const selected=`((h.type='data' AND h.namespace IN(SELECT value FROM json_each(?,'$.namespaces'))) OR (h.type='file' AND json_extract(?,'$.files')=1 AND ${allowedFile('h.path')}))`;
   return [
     stmt(env,`DELETE FROM device_contents AS h WHERE device=? AND ${selected} AND NOT EXISTS(SELECT 1 FROM publish_checks c WHERE c.session=? AND c.identity=h.identity AND ${matchingCheck}) AND ${complete}`,device.id,row.scope,row.scope,...policyValues(row.scope,policy),row.token,device.user_id,row.token),

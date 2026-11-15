@@ -18,6 +18,7 @@ export async function createHarness({assets=false,setup=true,migrations=MIGRATIO
     const path=new URL(request.url).pathname;const file=path==='/'?'/index.html':path;
     return staticFiles.has(file)?new Response(staticFiles.get(file),{headers:{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.svg')?'image/svg+xml':'text/html; charset=utf-8'}}):new Response('Not found',{status:404});
   }}});
+  try{
   const db=await mf.getD1Database('DB');
   for(const name of MIGRATION_NAMES.slice(0,migrations)){
     const sql=await readFile(new URL('../migrations/'+name,import.meta.url),'utf8');
@@ -41,4 +42,5 @@ export async function createHarness({assets=false,setup=true,migrations=MIGRATIO
     return {patch,result:await request(`/api/admin/spaces/${owner}/commit`,{method:'POST',data:{opId:crypto.randomUUID(),patch}})};
   };
   return {mf,db,request,createUser,bind,put,dispose:()=>mf.dispose()};
+  }catch(error){await mf.dispose();throw error;}
 }

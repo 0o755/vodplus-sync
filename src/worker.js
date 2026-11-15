@@ -12,7 +12,7 @@ import {ensureSchema} from './schema/ensure.js';
 import {genericRoute} from './generic/routes.js';
 
 export default {
-  async scheduled(_event, env) { await ensureSchema(env);await maintenance(env); },
+  async scheduled(_event, env) { if(await ensureSchema(env))await maintenance(env); },
   async fetch(request, env) {
     try {
       const url = new URL(request.url);

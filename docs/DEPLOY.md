@@ -46,9 +46,9 @@
 ```json
 {
   "ok": true,
-  "requiredSchema": 11,
+  "requiredSchema": 12,
   "syncApi": 2,
-  "capabilities": ["push-check","device-held-content"],
+  "capabilities": ["push-check","device-held-content","compact-sync-state"],
   "automaticMigration": true,
   "code": "OK",
   "missingMigrations": []

@@ -7,9 +7,10 @@ import {syncSettings} from '../sync/settings.js';
 import {requestId,scopeValue} from './input.js';
 import {snapshotStatements,differenceStatement} from './snapshot.js';
 import {heldScope,heldScopeValues,rememberRestored} from './held.js';
+import {headsSql,emptyRestore,isEmptyRestore,acknowledgeEmpty,rememberRestoreSummary,latestRestoreSql} from './summary.js';
 
 async function sessionInfo(env,row){
-  const info=await one(env,'SELECT COUNT(*) total, (SELECT marker FROM restore_items WHERE session=? ORDER BY position LIMIT 1) page FROM restore_items WHERE session=?',row.token,row.token);
+  const info=isEmptyRestore(row)?{total:0,page:null}:await one(env,'SELECT COUNT(*) total, (SELECT marker FROM restore_items WHERE session=? ORDER BY position LIMIT 1) page FROM restore_items WHERE session=?',row.token,row.token);
   return {session:row.token,mode:row.mode,page:info.page,total:info.total,expiresAt:row.expires,policy:JSON.parse(row.policy)};
 }
 async function start(env,device,input){
@@ -21,11 +22,13 @@ async function start(env,device,input){
   if(previous){assert(previous.fingerprint===fingerprint,409,'恢复范围变化，请开始新的下载');assert(previous.expires>Date.now(),410,'下载会话已过期，请重新开始');return json(await sessionInfo(env,previous));}
   const scopeHash=await digest(scope),session=token(),policy=JSON.stringify(await syncSettings(env)),now=Date.now();
   try{
+    if(!input.full){const empty=await emptyRestore(env,device,{session,operation,fingerprint,scopeHash,scope,policy,now});if(empty)return json(await sessionInfo(env,empty));}
     await env.DB.batch([
       stmt(env,`INSERT INTO restore_sessions(token,owner,device,request_id,fingerprint,scope_hash,scope,mode,policy,created,expires)
-        VALUES(?,?,?,?,?,?,?,CASE WHEN ? OR EXISTS(SELECT 1 FROM restore_baselines WHERE device=? AND scope_hash=? AND dirty=1) THEN 'full'
+        VALUES(?,?,?,?,?,?,json_set(?,'$._heads',json(${headsSql})),CASE WHEN ? OR EXISTS(SELECT 1 FROM restore_baselines WHERE device=? AND scope_hash=? AND dirty=1) THEN 'full'
           WHEN EXISTS(SELECT 1 FROM restore_baselines WHERE device=? AND scope_hash=? AND dirty=0) OR EXISTS(SELECT 1 FROM device_contents h WHERE h.device=? AND ${heldScope()}) THEN 'delta' ELSE 'full' END,?,?,?)`,
-        session,device.user_id,device.id,operation,fingerprint,scopeHash,scope,input.full===true?1:0,device.id,scopeHash,device.id,scopeHash,device.id,...heldScopeValues(scope),policy,now,now+86400000),
+        session,device.user_id,device.id,operation,fingerprint,scopeHash,scope,device.user_id,input.full===true?1:0,device.id,scopeHash,device.id,scopeHash,device.id,...heldScopeValues(scope),policy,now,now+86400000),
+      stmt(env,'DELETE FROM device_sync_summaries WHERE device=?',device.id),
       ...snapshotStatements(env,device,session,scope,policy),
       stmt(env,`INSERT OR IGNORE INTO restore_known(device,scope_hash,identity,type,namespace,key,path) SELECT ?,?,h.identity,h.type,h.namespace,h.key,h.path FROM device_contents h WHERE h.device=? AND ${heldScope()}`,device.id,scopeHash,device.id,...heldScopeValues(scope)),
       differenceStatement(env,device,session,scopeHash,scope,policy),
@@ -48,6 +51,7 @@ export async function restore(env,device,input){
   assert(row,404,'下载会话不存在');
   if(input.action==='ack'&&row.acknowledged)return json({ok:true});
   assert(row.expires>Date.now(),410,'下载会话已过期，请重新开始');
+  if(isEmptyRestore(row)){assert(input.action==='ack',404,'恢复包不存在');return acknowledgeEmpty(env,device,row);}
   if(input.action==='page'){
     assert(typeof input.page==='string',400,'缺少恢复包标记');
     const first=await one(env,'SELECT position FROM restore_items WHERE session=? AND marker=?',row.token,input.page);
@@ -70,12 +74,13 @@ export async function restore(env,device,input){
     assert(row.delivered>=total.n,409,'恢复包尚未全部获取，请继续下载');
     const guard='EXISTS(SELECT 1 FROM restore_sessions WHERE token=? AND acknowledged=1)';
     const result=await env.DB.batch([
-      stmt(env,`UPDATE restore_sessions SET acknowledged=1 WHERE token=? AND seq=(SELECT MAX(seq) FROM restore_sessions WHERE device=? AND scope_hash=?)`,row.token,device.id,row.scope_hash),
+      stmt(env,`UPDATE restore_sessions SET acknowledged=1 WHERE token=? AND seq=${latestRestoreSql}`,row.token),
       stmt(env,`UPDATE restore_baselines SET session=?,seq=?,dirty=0 WHERE device=? AND scope_hash=? AND ${guard}`,row.token,row.seq,device.id,row.scope_hash,row.token),
       stmt(env,`DELETE FROM restore_known WHERE device=? AND scope_hash=? AND NOT EXISTS(SELECT 1 FROM restore_snapshots n WHERE n.session=? AND n.identity=restore_known.identity) AND ${guard}`,device.id,row.scope_hash,row.token,row.token),
       stmt(env,`INSERT OR IGNORE INTO restore_known(device,scope_hash,identity,type,namespace,key,path) SELECT ?,?,identity,type,namespace,key,path FROM restore_snapshots WHERE session=? AND ${guard}`,device.id,row.scope_hash,row.token,row.token),
       stmt(env,`UPDATE devices SET status='下载成功' WHERE id=? AND ${guard}`,device.id,row.token),
-      rememberRestored(env,device,row)
+      rememberRestored(env,device,row),
+      rememberRestoreSummary(env,device,row)
     ]);
     assert(result[0].meta.changes>0,409,'已有较新的下载任务，请重新开始完整下载',{code:'RESTORE_SUPERSEDED'});
     return json({ok:true});
