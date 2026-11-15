@@ -44,6 +44,10 @@ D1 的 `entities` 保存文件、目录、history、progress、search、config �
 - 路径拒绝绝对路径、反斜杠、冒号、点路径、控制符、百分号编码和 Windows 保留名。设备还须防止自身资源根目录中的符号链接逃逸。
 - 返回 CSP、no-store、nosniff、no-referrer；脚本内容作为纯文本下载，不执行在后台页面中。所有前端用户文本先转义。
 
+## App 地址与同步身份
+
+配套 App 的 SyncServerProfiles/SyncAccount 按地址保存加密绑定资料，本地 owner 独立持久化。修改地址会先停止旧连接和配置加载。原令牌在新地址鉴权成功时复用原 owner、队列与游标；401 后允许新设备码绑定，新身份使用独立 owner 并在传输前确认。旧地址资料与队列保留，切回时重新验证。此流程使用既有 settings/changes/bind 接口，不改变后端按设备凭证隔离用户的规则。
+
 ## 设备配置控制
 
 `devices/config.js` 保存单设备 desired/revision 和 reported/applied_revision，管理员写入使用已有 receipts 保证 opId 幂等。新指令只合并尚未确认的待办；设备本机在已确认之后的配置变化不会被无关的新指令覆盖。

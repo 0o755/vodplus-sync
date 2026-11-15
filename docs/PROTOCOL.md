@@ -17,7 +17,7 @@ Content-Type: application/json
 
 管理员使用 `/api/setup` 和 `/api/login` 建立 Cookie 会话。空库可直接 POST `{username,password}` 到 setup，密码最低 5 位；已有管理员返回 409。不需要初始化 Secret，不将管理员密码或 Cookie 交给 App。
 
-已有安装可在 bind 中增加 `expectedUserId`。有效码属于另一人物时返回 409 / USER_MISMATCH，并在同一事务内保证不消费码、不创建设备；新安装不传该字段。App 仍需校验返回 userId，保留原凭证和队列。
+已有安装在同一已验证身份续绑时，可在 bind 中增加 `expectedUserId`。有效码属于另一人物时返回 409 / USER_MISMATCH，并在同一事务内保证不消费码、不创建设备。新安装不传此字段；原令牌经目标服务器验证为 401 后，也允许不携带旧 expectedUserId 重新绑定。新身份开始传输前必须确认服务器和实际 username，旧凭据与队列单独保留，不直接重放给新身份。
 
 ## 一键绑定与同步规则
 
@@ -36,6 +36,8 @@ Content-Type: application/json
 新增排除目录或其下的新文件/内容返回 422，detail.code=`DIRECTORY_EXCLUDED`。变更流和历史读取不裁剪，规则变化也不自动清理旧内容。
 
 规则约束人物空间新文件或内容变化；已存文件删除、移动、停用及相同内容的恢复仍可提交。公共爬虫库不直接参与设备同步，发布不受此规则限制；复制到人物空间时遵守人物同步规则。
+
+服务器切换不新增后端接口：App 停止旧连接后保存新地址，以原设备令牌读取 settings（旧接口 404 时用只读 changes）验证。成功则保留原同步空间；401 允许新码绑定；网络失败保留地址并等待改正/重试。详见 [App 接入](APP_INTEGRATION.md#已绑定服务器切换)。
 
 ## 文件完整上传
 
@@ -110,7 +112,7 @@ Authorization: Bearer <token>
 {"cursor":25,"ok":true}
 ```
 
-失败可提交旧的、最后成功 cursor，`ok:false,error:"校验失败"`。ACK 游标只能在该用户范围内前进；不能提前 ACK 尚未落盘的远程变化。当前游标由 App 按服务器+人物持久保存，切换人物使用另一游标。
+失败可提交旧的、最后成功 cursor，`ok:false,error:"校验失败"`。ACK 游标只能在该用户范围内前进；不能提前 ACK 尚未落盘的远程变化。当前游标按 App 持久保存的本地 owner 隔离。新地址用原令牌验证成功的同后台迁移复用原 owner/游标；切换到新人物使用独立 owner 和游标。按地址保存的绑定资料与云端由凭证确定的 userId 是两层概念，客户端不能自行指定云端 owner。
 
 ## 观看记录与配置身份
 
