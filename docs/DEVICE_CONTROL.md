@@ -1,23 +1,32 @@
-# 按设备读取与下发配置
+# 设备配置 API
 
-此功能独立于人物的历史和共享 config 记录。只修改选中的 deviceId，不影响同人物的其他设备。后台保存指令不等于 App 已成功加载，必须以设备回报为准。
+用于读取设备当前配置、下发修改和请求设备重新上报。配置按设备独立保存。
 
-App 应用设备指令时须标记远程/设备级来源，同时更新本地防回传基线；不能被已有 Config 监听或下一轮快照重新上传成人物共享配置，间接让其他设备跟随切换。
+## 配置值
 
-## 字段
+`values` 为对象，支持以下字段：
 
-四项值都用字符串表示：`vod` 点播、`live` 直播、`theme` 主题、`wallpaper` 壁纸。URL 或现有 App 支持的配置值由 App 的相应加载器处理；服务端不会代为请求这些地址。空字符串表示清空/恢复默认。
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| vod | string | 点播配置 |
+| live | string | 直播配置 |
+| theme | string | 主题设置 |
+| wallpaper | string | 壁纸设置 |
 
-## App 接口
+每项最多 4096 个字符，不含控制字符，首尾空白会被去除。空字符串表示清空。设备负责加载配置值并回报实际结果。
 
-都使用该设备的 Bearer token，不接受客户端传 deviceId 来切换目标。
+## 设备接口
 
-`GET /api/sync/device-config`：
+鉴权：`Authorization: Bearer <device-token>`。
+
+### GET /api/sync/device-config
+
+获取待应用配置和回报状态，无请求参数。
 
 ```json
 {
   "revision": 2,
-  "values": {"vod":"https://example.com/vod.json"},
+  "values": {"theme":"dark"},
   "appliedRevision": 1,
   "refreshRevision": 3,
   "reportSeq": 5,
@@ -25,41 +34,98 @@ App 应用设备指令时须标记远程/设备级来源，同时更新本地防
 }
 ```
 
-- `values` 只包含待应用的字段，没有待办时为 `{}`，不要求所有字段一起改。
-- `revision` 是管理员指令版本；未确认的多次修改会合并，已确认的旧字段不会被无关的新指令重复下发。
-- `refreshRevision` 是实时取值请求序号，更新后应重新采集当前值并上报。
-- `reportSeq` 是已接受的最新回报序号，用于首次恢复本机计数。
+| 返回字段 | 类型 | 说明 |
+| --- | --- | --- |
+| revision | integer | 当前下发配置序号 |
+| values | object | 待应用字段；没有待办时为 {} |
+| appliedRevision | integer | 设备已确认成功的配置序号 |
+| refreshRevision | integer | 实时取值请求序号 |
+| reportSeq | integer | 服务端已接受的回报序号 |
+| pollAfterMs | integer | 轮询间隔提示，单位毫秒 |
 
-`POST /api/sync/device-config/report`：
+### POST /api/sync/device-config/report
+
+上报设备的实际配置和应用结果。
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| sequence | integer | 是 | 从 1 开始递增的回报序号 |
+| values | object | 是 | 四个配置字段的实际值 |
+| appliedRevision | integer | 是 | 已成功应用的配置序号，至少为 0 |
+| refreshRevision | integer | 是 | 本次响应的取值请求序号，至少为 0 |
+| error | string | 否 | 应用失败原因，最多 500 个字符 |
 
 ```json
 {
   "sequence": 6,
-  "values": {"vod":"https://example.com/vod.json","live":"","theme":"system","wallpaper":""},
+  "values": {"vod":"","live":"","theme":"dark","wallpaper":""},
   "appliedRevision": 2,
   "refreshRevision": 3,
   "error": ""
 }
 ```
 
-每次必须上报四项真实值。`sequence` 按设备单调递增；同序号同内容重试幂等，旧序号或同序号不同内容返回 409。应用成功后才推进 appliedRevision；失败保持最后成功版本、回报实际值并填写最多 500 字符的 error。当前完整版本确认时，服务端校验实际值与下发字段一致。
+成功返回 `200`：`{"ok":true}`。
 
-先持久化这次完整回报再发送，网络失败重发同一序号和内容。收到 409 后重新 GET 并重新采集本机值；不能把过时采样换成更大序号强行覆盖。应用过程中又有新指令时，可以先确认已经完成的旧版本，再读取下一版；后台仍显示新版本待处理。
+相同 sequence 与相同内容重试幂等。已使用序号携带不同内容，或回报状态超出服务端下发范围时，返回 409。
 
-建议绑定有效且 App 前台运行时约 5 秒检查一次，使用独立的有界控制任务，不被大量文件传输阻塞。不要求 App 退出后强保活或 WebSocket。初次绑定、四项值本机变化和刷新请求变化时主动上报；无需每 5 秒无条件重复写相同回报。旧后台返回 404 时跳过此能力，不能影响普通同步。
+应用失败时，保留最后成功的 appliedRevision，并填写 error。确认当前配置成功时，实际值必须与待确认字段一致。
 
-## 管理端接口
+## 管理接口
 
-- `GET /api/admin/devices/:id/config`：返回 desired、revision、current、reportedAt、appliedRevision、reportSeq、refreshRevision、reportedRefreshRevision、requestedAt、error。`current=null` 表示从未收到真实回报。
-- `PUT /api/admin/devices/:id/config`：`{opId,baseRevision,values}`，values 是要修改的字段。相同 opId 原请求重试幂等；过时 baseRevision 返回 409。
-- `POST /api/admin/devices/:id/config/refresh`：返回递增 refreshRevision，不会伪造设备当前值。
+鉴权：管理员 Cookie。
 
-后台弹窗每 2 秒查看新回报，最长等待 60 秒。设备未运行、离线或尚未接入接口时，显示最后回报和等待提示。关闭弹窗停止轮询。
+### GET /api/admin/devices/{deviceId}/config
 
-## 已有绑定保护
+读取配置指令与设备实际回报。
 
-`POST /api/bind` 允许额外携带 `expectedUserId`。有此字段时，设备码必须属于该人物；有效码不匹配返回 `409` 和 `detail.code=USER_MISMATCH`，不消费码、不创建设备。过期或已使用的无效码仍返回 401。新安装不传此字段。
+| 返回字段 | 类型 | 说明 |
+| --- | --- | --- |
+| revision | integer | 下发序号 |
+| desired | object | 下发配置 |
+| appliedRevision | integer | 已确认序号 |
+| current | object \| null | 实际回报；null 表示尚未回报 |
+| reportedAt | integer \| null | 回报时间 |
+| reportSeq | integer | 回报序号 |
+| refreshRevision | integer | 取值请求序号 |
+| reportedRefreshRevision | integer | 设备已响应的取值序号 |
+| requestedAt | integer \| null | 配置请求时间 |
+| error | string | 最近应用错误 |
 
-已绑定状态允许手动修改服务器，其他域名的一键绑定也走切换流程，不再硬拒绝。App 先停止旧请求与配置加载，保存新地址后用原令牌验证；成功时复用原本地 owner、队列和游标。401 时保留旧地址资料和队列，解除当前失效授权并允许新设备码绑定，不再携带旧 expectedUserId。新身份首次传输前展示服务器和实际用户名供确认，不能直接重放旧人物队列。
+### PUT /api/admin/devices/{deviceId}/config
 
-首次外部链接仍确认服务器来源；切回旧地址可以恢复该地址资料并重新验证，连接失败也允许再次改正地址。同地址重新部署后续绑同样先验证旧授权。App 本机文件和历史不会被清除，后台重置不会自动触发。
+下发所选配置字段。
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| opId | string | 是 | 操作标记，8–100 个字母、数字、下划线或连字符 |
+| baseRevision | integer | 是 | 最近读取的 revision |
+| values | object | 是 | 至少包含一个配置字段 |
+
+```json
+{
+  "opId": "550e8400-e29b-41d4-a716-446655440004",
+  "baseRevision": 1,
+  "values": {"theme":"dark"}
+}
+```
+
+成功返回 `200`：`{"revision":2}`。基础序号已变化时返回 409，重新读取后再提交。
+
+### POST /api/admin/devices/{deviceId}/config/refresh
+
+请求设备重新采集当前值。无业务参数，JSON 请求体可使用 `{}`。
+
+成功返回 `200`：`{"refreshRevision":4}`。
+
+## 处理流程
+
+1. 设备读取配置状态。
+2. 存在待应用字段时，调用相应加载器。
+3. 重新采集四项实际值。
+4. 持久化本次回报，发送 report。
+5. 网络失败时，重发相同序号和内容。
+
+取值请求序号变化时，重新采集并上报。客户端可根据 pollAfterMs 轮询；仅轮询到状态不代表配置已经应用。
+
+设备配置用于单设备控制。客户端应区分设备控制与用户共享数据，避免把单设备指令再次发布到全部设备。

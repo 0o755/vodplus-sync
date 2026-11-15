@@ -1,79 +1,321 @@
-# 通用同步 API v2（对接契约）
+# 数据同步 API
 
-后台只保存按用户隔离的 JSON 与普通文件，不解释客户端业务。所有接口沿用设备绑定返回的 `Authorization: Bearer <token>`。默认由客户端用户手动选择推送或下载；普通同步不自动推送本机修改。
+基础地址：`https://sync.example.com`。
 
-可直接参考 [轻量 JavaScript SDK](../examples/sync-v2-client.js)：`pushAll` 枚举本次数据/文件并确认清单，`download` 自动分页和确认。`onProgress` 返回同一任务累计进度，调用方更新同一行即可；`putFile` 负责完整写临时文件再替换，真实 I/O 错误直接抛出，SDK 不会确认成功。
+鉴权统一使用 `Authorization: Bearer <device-token>`。JSON 请求采用 `Content-Type: application/json`。设备绑定方法见 [API 参考](PROTOCOL.md#post-apibind)。
 
-后台创建用户并生成设备码后，客户端用 `POST /api/bind` 提交 `{code,deviceName}`，获得 `{deviceId,userId,token,username}`。不传管理员密码，不自行指定 userId。`GET /api/health` 的 `syncApi:2` 表示支持本文协议；`GET /api/sync/settings` 可使用相同设备凭证读取通用文件规则。
+## 数据类型
 
-## 数据与推送
+### Record
 
-`POST /api/v2/sync/push`，JSON：
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| namespace | string | 数据分区，1–120 个字符；首字符为字母或数字，其余可用字母、数字、点、下划线和连字符 |
+| key | string | 分区内的记录名称，1–2000 个字符，不含控制字符 |
+| value | JSON | 对象、数组、字符串、数字、布尔值或 null |
 
-```json
-{"requestId":"本次操作UUID","namespace":"org.example.app.settings","upsert":[{"key":"preferences","value":{"theme":"dark","extensions":{}}}],"delete":["removed-record"]}
-```
+记录由 `namespace + key` 唯一定位。建议使用应用域名组织分区，例如 `com.example.notes`。`legacy.` 为系统保留前缀，不用于写入。
 
-`namespace` 是客户端约定的数据分区，`key` 是该分区里的普通字符串名称，不是摘要或服务器记录 ID；单例可以始终用 `preferences`。`value` 可为任意 JSON。服务端负责 ID、版本、去重、发布和历史。响应 `{ "ok":true }`。同一 requestId 重试必须使用同一内容；不同请求按服务器提交顺序覆盖同一个 key。
+### Scope
 
-仅 upsert 列出的 key 整体替换，delete 列出的 key 删除，省略的记录、其他 namespace 均保持不变。没有隐式“全量推送即删除遗漏项”。各客户端扩展须使用独立 namespace/key，不能在共同 JSON 文档里整体替换其他客户端的未知字段。`legacy.*` 为只读旧数据分区。
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| namespaces | string[] | 是 | — | 精确匹配的数据分区，最多 32 项，可为空数组 |
+| files | boolean | 否 | false | 是否包含文件 |
+| roots | string[] | 否 | `[""]` | files=true 时使用，最多 32 项；空字符串表示根目录 |
 
-一次最多 50 个 upsert/delete，总 JSON 128 KiB，单条 value 16 KiB；更多记录分批提交。namespace 最长 120 字符，key 最长 2000 字符。每个用户现有 5000 条实体上限继续有效。
+至少选择一个数据分区或启用文件。目录使用相对路径，包含该目录及其子项。
 
-## 文件推送
+### OperationId
 
-`PUT /api/v2/sync/file?path=<编码的相对路径>`，请求体为原始字节，`Content-Type: application/octet-stream`，`Idempotency-Key: <本次操作UUID>`。成功响应 `{ "ok":true,"path":"dir/a.py","size":123 }`。服务端计算摘要、创建父目录、复用内容并发布；无需先传 blob、hash、ID 或版本。同路径覆盖，不删除其他路径。当前纯 D1 单文件仍限 1.5 MiB。
+`requestId` 和 `Idempotency-Key` 使用 8–100 个字母、数字、下划线或连字符，可直接使用 UUID。同一操作重试时保留原标记和请求内容；修改内容时生成新的标记。
 
-`DELETE /api/v2/sync/file?path=...`，相同 Idempotency-Key 规则；仅删除该普通文件，不递归删除目录。不存在也成功。移动可先写入新路径再删除旧路径。
+## 推送记录
 
-后缀/排除目录规则应用于文件上传与恢复。被排除的上传返回 200 `{ "ok":true,"skipped":true,"reason":"DIRECTORY_EXCLUDED" }` 或 `FILE_TYPE_NOT_ALLOWED`，不是同步失败；不会因未上传或排除而隐式删除旧文件。
+### POST /api/v2/sync/push
 
-### 手动完整推送
+创建、覆盖或删除指定记录。
 
-为避免客户端维护旧清单，同一 push 接口支持完整发布会话：
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| requestId | OperationId | 是 | 本次请求标记 |
+| namespace | string | 是 | 目标数据分区 |
+| upsert | array | 否 | `{key,value}` 列表 |
+| delete | string[] | 否 | 要删除的 key 列表 |
+| session | string | 否 | 完整发布会话标记 |
 
-1. `POST /api/v2/sync/push`：`{"action":"start","requestId":"UUID","scope":{"namespaces":["org.example.app.settings"],"files":true,"roots":[""]}}`，返回 `{session,expiresAt}`。
-2. 分批推送本机当前全部记录，每次原数据推送 body 增加 `session`；逐个推送当前文件时增加 `X-Sync-Session` 请求头。成功的 key/路径自动进入本次清单；无需上传旧清单或计算差异。规则排除的文件可以省略。
-3. 所有上传成功后 `POST /api/v2/sync/push`：`{"action":"finish","session":"..."}`。服务器删除指定分区/文件根范围内本次未出现的记录或文件；保留其他分区、范围外文件及当前排除项。返回 `{ok:true}`，重复确认幂等。
-
-未 finish 不会按遗漏项删除，已成功上传的单项可见；这不是整批回滚事务。会话绑定设备，有效期 24 小时；过期重新开始。每个分区须由客户端明确管理，不能把其他客户端的扩展分区包括在完整发布范围里。
-
-## 唯一恢复接口
-
-所有阶段使用 `POST /api/v2/sync/restore`。客户端仅保存服务端返回的不透明 session/page/content 标记，无需游标、版本、hash 或本地扫描比较。
-
-开始：
-
-```json
-{"action":"start","requestId":"本次下载UUID","scope":{"namespaces":["org.example.app.settings","legacy.config"],"files":true,"roots":[""]},"full":false}
-```
-
-`namespaces` 必填且为精确名称；`files` 默认 false，true 时 roots 默认为 `[""]`（全部相对目录）。不同 scope 独立保存设备上次成功恢复的状态。首次为 full，后续默认 delta；`full:true` 强制全量。在线点播是否选择 files、客户端本地目录映射完全由客户端决定。服务端没有 LocalFiles、点播/直播或绝对路径概念。
-
-响应：
+`upsert` 与 `delete` 合计 1–50 项，同一个 key 不能重复出现。请求最多 128 KiB；单条记录的 namespace、key、value 序列化封装最多 16 KiB。
 
 ```json
-{"session":"不透明标记","mode":"delta","page":"第一页标记","total":3,"expiresAt":1800000000000,"policy":{"fileExtensions":["py"],"includeExtensionless":true,"excludedDirectories":["_cache","__pycache__","pycache"]}}
+{
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
+  "namespace": "com.example.notes",
+  "upsert": [
+    {"key":"welcome","value":{"text":"Hello","pinned":true}}
+  ],
+  "delete": ["draft"]
+}
 ```
 
-取包：`{"action":"page","session":"...","page":"..."}`。
+成功返回 `200`：
 
 ```json
-{"items":[{"type":"data","op":"put","namespace":"org.example.app.settings","key":"preferences","value":{"theme":"dark"}},{"type":"file","op":"put","path":"dir/a.py","size":123,"content":"内容标记"},{"type":"file","op":"delete","path":"removed.py"}],"next":"下一页标记或null","done":false}
+{"ok":true}
 ```
 
-数据删除项为 `type:data, op:delete, namespace, key`。每页最多 25 项，文件字节不内嵌 JSON。`{"action":"content","session":"...","content":"..."}` 返回固定快照的原始文件字节。开始后发生的云端更新留到下次恢复，不混入当前会话。所有标记绑定该设备与用户，不能跨设备使用。
+每个 upsert 整体替换对应 value，未指定的记录保持不变。同一记录的并发请求按服务器提交顺序生效。
 
-客户端收到 put 直接覆盖本机，即使本机有未推送修改；收到 delete 直接删除。文件正常下载完整后替换。完整恢复下发所选 namespace 的全部记录，客户端先清空这些自己管理的分区再应用；其他 namespace 保留。文件 full 下发全部允许文件以及服务端已知删除，不能凭空删除服务端从未见过的本地文件；不需要本地扫描对比。排除规则造成的消失不会生成删除通知。
+## 上传文件
 
-所有包和文件都成功应用后：`{"action":"ack","session":"..."}`，响应 `{ "ok":true }`。只有 ack 成功才推进设备基线；失败、中断不确认，可用原 session/page 重取，重复 ack 幂等。必须先取完分页；应用是否成功由客户端负责。会话有效期 24 小时，过期返回 410，重新 start 将按最后成功基线重新恢复。云端基线按用户/设备/规范化 scope 隔离，较旧会话确认不会覆盖较新基线。
+### PUT /api/v2/sync/file
 
-未确认就开始新会话会自动转为 full，补发全部当前内容及此前可能应用的删除通知；因此中断后云端恰好改回旧值也不会漏恢复。旧会话被较新会话替代后确认会返回 409 `RESTORE_SUPERSEDED`，重新开始下载即可。客户端只需串行执行同一范围的恢复，不做版本冲突判断。
+请求体为文件原始字节。
 
-## 旧数据与上线
+| 位置 | 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- | --- |
+| Query | path | string | 是 | URL 编码的相对文件路径 |
+| Header | Idempotency-Key | OperationId | 是 | 本次上传标记 |
+| Header | X-Sync-Session | string | 否 | 完整发布会话标记 |
+| Header | Content-Type | string | 是 | `application/octet-stream` |
+| Body | — | binary | 是 | 文件内容，最多 1,572,864 字节 |
 
-原账号、设备 token、分享、后台文件界面与版本历史保留。新文件接口和后台共用现有文件存储。旧非文件实体以 `legacy.<原kind>`、key=原实体 ID、value=原 data 原样提供，后台不解释内容；例如既有 config 被读取为 legacy.config。客户端可读取后转入自己的 namespace，旧记录保留供旧版使用。v2 不要求再生成旧协议的 SHA256 ID。旧 API 暂时继续工作。
+```http
+PUT /api/v2/sync/file?path=notes%2Freadme.txt HTTP/1.1
+Authorization: Bearer <device-token>
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440001
+Content-Type: application/octet-stream
 
-旧数据是兼容导入来源，不应每次覆盖客户端已发布的新分区。客户端可在自己的扩展分区保存已导入标记；该标记及旧数据的业务转换由客户端决定，服务端不识别其含义。
+Hello
+```
 
-先上线后端 v2 与文档，确认健康检查正常，再发布使用 v2 的 App。客户端遇到 404 应提示服务器需升级，不静默改用自动双向推送。错误沿用 `{error,detail?}`；同一任务在客户端一行更新累计进度，不逐文件写日志。
+成功返回 `200`：
+
+```json
+{"ok":true,"path":"notes/readme.txt","size":5}
+```
+
+父目录自动创建；同路径文件被覆盖，内容相同的文件在用户空间内去重。
+
+路径应使用 NFC 规范化文本，最长 500 个字符，以 `/` 分隔。禁止绝对路径、`.`、`..` 路径段、反斜杠、控制字符和文件系统保留字符。
+
+被规则排除时返回 `200`，不写入文件：
+
+```json
+{"ok":true,"skipped":true,"reason":"DIRECTORY_EXCLUDED"}
+```
+
+`reason` 可为 `DIRECTORY_EXCLUDED` 或 `FILE_TYPE_NOT_ALLOWED`。
+
+## 删除文件
+
+### DELETE /api/v2/sync/file
+
+| 位置 | 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- | --- |
+| Query | path | string | 是 | 相对文件路径 |
+| Header | Idempotency-Key | OperationId | 是 | 本次删除标记 |
+| Header | X-Sync-Session | string | 否 | 发布会话标记 |
+
+成功返回 `200`：`{"ok":true,"path":"notes/readme.txt"}`。
+
+目标不存在时仍成功。该接口删除普通文件，不递归删除目录。规则排除项返回 skipped 结果。
+
+## 完整发布
+
+完整发布由三个步骤组成：创建会话、上传本次全部内容、确认清单。上传成功的记录和文件自动记入服务端清单。
+
+### 1. 创建会话
+
+`POST /api/v2/sync/push`
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| action | string | 是 | 固定值 `start` |
+| requestId | OperationId | 是 | 本次发布标记 |
+| scope | Scope | 是 | 发布范围 |
+
+```json
+{
+  "action": "start",
+  "requestId": "550e8400-e29b-41d4-a716-446655440002",
+  "scope": {
+    "namespaces": ["com.example.notes"],
+    "files": true,
+    "roots": ["notes"]
+  }
+}
+```
+
+返回 `200`：
+
+```json
+{"session":"<publish-session>","expiresAt":1800000000000}
+```
+
+### 2. 上传内容
+
+分批上传该范围内的全部当前记录和文件：
+
+- 记录请求增加 `session` 字段。
+- 文件请求增加 `X-Sync-Session` 请求头。
+- 规则排除项可以省略。
+
+### 3. 确认清单
+
+`POST /api/v2/sync/push`
+
+```json
+{"action":"finish","session":"<publish-session>"}
+```
+
+返回 `200`：`{"ok":true}`。
+
+确认后，服务端删除范围内未出现在本次清单中的记录和文件。范围外数据及文件规则排除项保持不变。空清单表示删除该范围内全部符合条件的项目。
+
+会话有效期为 24 小时。没有确认时不按清单缺失执行删除；已经成功上传的项目可见。确认可重复提交。
+
+## 恢复数据
+
+### POST /api/v2/sync/restore
+
+使用同一接口完成开始、分页、文件读取和成功确认。所有会话及资源标记仅供发起设备使用。
+
+### 1. 开始恢复
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| action | string | 是 | — | `start` |
+| requestId | OperationId | 是 | — | 本次恢复标记 |
+| scope | Scope | 是 | — | 恢复范围 |
+| full | boolean | 否 | false | 强制完整恢复 |
+
+```json
+{
+  "action": "start",
+  "requestId": "550e8400-e29b-41d4-a716-446655440003",
+  "scope": {"namespaces":["com.example.notes"],"files":true},
+  "full": false
+}
+```
+
+返回 `200`：
+
+```json
+{
+  "session": "<restore-session>",
+  "mode": "delta",
+  "page": "<page-marker>",
+  "total": 3,
+  "expiresAt": 1800000000000,
+  "policy": {
+    "fileExtensions": ["txt","json"],
+    "includeExtensionless": true,
+    "excludedDirectories": ["_cache","__pycache__","pycache"],
+    "revision": 1
+  }
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| mode | `full` 为完整恢复，`delta` 为变化恢复 |
+| page | 第一页标记；没有项目时为 null |
+| total | 本次需要处理的项目数 |
+| expiresAt | 会话到期时间 |
+| policy | 本次恢复使用的文件规则 |
+
+首次恢复、显式指定 full，或存在未确认任务时，使用 full。服务端按用户、设备和规范化 scope 保存成功恢复状态。
+
+### 2. 获取恢复包
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| action | string | 是 | `page` |
+| session | string | 是 | 恢复会话 |
+| page | string | 是 | 返回的页面标记 |
+
+```json
+{"action":"page","session":"<restore-session>","page":"<page-marker>"}
+```
+
+返回 `200`：
+
+```json
+{
+  "items": [
+    {"type":"data","op":"put","namespace":"com.example.notes","key":"welcome","value":{"text":"Hello"}},
+    {"type":"file","op":"put","path":"notes/readme.txt","size":5,"content":"<content-marker>"},
+    {"type":"file","op":"delete","path":"notes/draft.txt"}
+  ],
+  "next": null,
+  "done": true
+}
+```
+
+| 项目 | 字段 |
+| --- | --- |
+| 写入记录 | `type=data, op=put, namespace, key, value` |
+| 删除记录 | `type=data, op=delete, namespace, key` |
+| 写入文件 | `type=file, op=put, path, size, content` |
+| 删除文件 | `type=file, op=delete, path` |
+
+每页最多 25 项。`next` 为后续页面标记，为 null 时结束。页面可以重复读取，内容固定于本次恢复快照。
+
+### 3. 获取文件内容
+
+```json
+{"action":"content","session":"<restore-session>","content":"<content-marker>"}
+```
+
+返回 `200`、`Content-Type: application/octet-stream` 和原始文件字节。
+
+客户端完整下载后替换目标文件。数据 put 覆盖对应记录，delete 删除对应项目。
+
+### 4. 确认成功
+
+```json
+{"action":"ack","session":"<restore-session>"}
+```
+
+返回 `200`：`{"ok":true}`。
+
+必须获取全部分页，并成功应用所有项目后再确认。确认后才更新恢复进度；重复确认幂等。
+
+### 恢复语义
+
+- full 下，客户端先清空所选数据分区，再应用完整记录；其他分区保留。
+- 文件 full 下发全部允许文件和服务端已知的删除项。未进入云端管理范围的本地文件保留。
+- 文件规则排除造成的消失不生成删除通知。
+- 会话开始后的云端变化在后续恢复中获取。
+- 会话有效期 24 小时。过期返回 410，使用新的 requestId 重新开始。
+- 未确认任务重新开始时执行 full，包含必要删除通知。
+- 被其他恢复任务替代的任务确认返回 409，诊断码为 `RESTORE_SUPERSEDED`。
+
+## 文件规则
+
+### GET /api/sync/settings
+
+返回 `200`：
+
+```json
+{
+  "fileExtensions": ["py","js","txt","json","m3u8","jar","php","html"],
+  "includeExtensionless": true,
+  "excludedDirectories": ["_cache","__pycache__","pycache"],
+  "revision": 1
+}
+```
+
+目录排除忽略大小写，匹配任意路径层级及其子树。后缀取文件名最后一个点之后的部分；以单个点开头且没有其他点的文件视为无后缀。
+
+## 容量
+
+| 项目 | 限制 |
+| --- | --- |
+| JSON 请求 | 128 KiB |
+| 单条记录封装 | 16 KiB |
+| 每次记录推送 | 50 项 |
+| 单文件 | 1.5 MiB |
+| 每个用户空间 | 5000 条实体，含目录和删除标记 |
+| 恢复包 | 每页 25 项 |
+| 发布、恢复会话 | 24 小时 |

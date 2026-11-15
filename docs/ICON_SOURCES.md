@@ -1,5 +1,14 @@
-# 文件类型图标来源
+# 图标来源与许可
 
-Python、JavaScript、JSON、PHP、Java/JAR、HTML、文本、播放列表及其他文件类型图标取自 [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme)，固定提交 `ced21b9b5241c1efa502a8c46ec7363a690a7058`，按 MIT 许可证分发，完整许可见 [ICON_LICENSE.txt](ICON_LICENSE.txt)。仅打包本项目使用的小型 SVG，不加载外部 CDN。
+文件类型图标来自 [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme)，采用 MIT 许可证。
 
-黄色文件夹和展开文件夹为本项目绘制。未识别后缀使用通用文档图标，无后缀文件使用二进制图标；类型判断不依赖用户设备的操作系统文件关联。
+| 项目 | 说明 |
+| --- | --- |
+| 来源提交 | `ced21b9b5241c1efa502a8c46ec7363a690a7058` |
+| 使用范围 | Python、JavaScript、JSON、PHP、Java/JAR、HTML、文本、播放列表等文件图标 |
+| 资源形式 | 随项目分发的 SVG |
+| 完整许可 | [ICON_LICENSE.txt](ICON_LICENSE.txt) |
+
+文件夹及展开状态图标由本项目绘制。文件类型按后缀判断，无法识别的类型使用通用图标，无后缀文件使用二进制图标。
+
+添加或替换第三方图标时，应保留来源、许可证和版权声明。
