@@ -10,7 +10,7 @@ const dir=async(owner,path)=>(await adminCommit(owner,{id:crypto.randomUUID(),ki
 
 test('匿名不能读取管理接口，初始化不可重复且拒绝跨站',async()=>{
   assert.equal((await h.request('/api/admin/overview',{admin:false})).status,401);
-  assert.equal((await h.request('/api/setup',{method:'POST',data:{secret:'wrong',username:'a',password:'test-password-1234'}})).status,403);
+  assert.equal((await h.request('/api/setup',{method:'POST',data:{username:'a',password:'test-password-1234'}})).status,409);
   assert.equal((await h.request('/api/admin/users',{method:'POST',headers:{origin:'https://evil.test'},data:{name:'攻击'}})).status,403);
 });
 test('绑定码仅消费一次，用户名不是授权凭证',async()=>{

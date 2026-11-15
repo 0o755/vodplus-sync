@@ -69,6 +69,6 @@ SQLite 内部事务读取记录快照并写 outbox，不复制活跃数据库文
 
 可先由浏览器打开 `/s/<shareId>` 输入密码，获得带 token 的配置 URL，再粘贴到 App。生成的脚本 URL 保留扩展名，JSON 相对依赖会自动带授权；是否兼容所有 ys 加载器仍须安装后实测，不能以服务端测试代替真机结论。
 
-若要 App 内原生密码弹窗，检测 `/share/` 的 401 和 `detail.authUrl`，只对同源 authUrl 发 POST；成功后保存 token/到期时间并重新加载。不要把旧 Apidog/Apifox 的 Cookie 提交协议直接套过来。token 过期或撤销后重新输入分享密码，不涉及人物同步 token。
+若要 App 内原生密码弹窗，检测 `/share/` 的 401 和 `detail.authUrl`，只对同源 authUrl 发 POST；成功后保存永久 token（expires 为 null）并重新加载；公开接口不需要密码或 token。不要把旧 Apidog/Apifox 的 Cookie 提交协议直接套过来。token 被主动撤销后重新输入分享密码，不涉及人物同步 token。
 
 只读参考入口：`LocalFileSetting.java`、`LocalFileConfig.java`、`bean/History.java`、`bean/Config.java`、`app/src/mobile/.../SettingFragment.java` 与 `fragment_setting.xml`。大屏入口位于 `app/src/leanback`；同步核心应放在共享 main 模块。

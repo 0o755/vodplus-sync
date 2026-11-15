@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { parse, printParseErrorCode } from 'jsonc-parser';
 import { createWrangler } from './deploy/wrangler.mjs';
 import { provisionDatabase } from './deploy/database.mjs';
+import { buildStyles } from './styles.mjs';
 
 export async function deployProject({ root = fileURLToPath(new URL('../', import.meta.url)), runner, log = console.log } = {}) {
   const errors = [];
@@ -31,5 +32,5 @@ export async function deployProject({ root = fileURLToPath(new URL('../', import
   }
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  deployProject().catch(error => { console.error(`部署停止：${error.message}`); process.exitCode = 1; });
+  Promise.resolve().then(buildStyles).then(()=>deployProject()).catch(error => { console.error(`部署停止：${error.message}`); process.exitCode = 1; });
 }

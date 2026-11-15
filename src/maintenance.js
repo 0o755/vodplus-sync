@@ -4,7 +4,7 @@ export async function maintenance(env) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM sessions WHERE expires<?').bind(now),
     env.DB.prepare('DELETE FROM bindings WHERE expires<?').bind(now),
-    env.DB.prepare('DELETE FROM share_tokens WHERE expires<?').bind(now),
+    env.DB.prepare('DELETE FROM share_tokens WHERE expires>0 AND expires<?').bind(now),
     env.DB.prepare('DELETE FROM rate_limits WHERE expires<?').bind(now),
     env.DB.prepare('DELETE FROM events WHERE created<?').bind(now - 30 * 86400000)
   ]);

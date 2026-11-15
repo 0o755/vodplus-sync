@@ -13,7 +13,7 @@ export async function adminRoute(env, request, url) {
     users: await all(env, 'SELECT * FROM users ORDER BY created'),
     devices: await all(env, 'SELECT d.id,d.user_id,d.name,d.revoked,d.last_seen,d.cursor,d.status,u.name user_name FROM devices d JOIN users u ON d.user_id=u.id ORDER BY last_seen DESC'),
     events: await all(env, 'SELECT e.*,u.name user_name,d.name device_name FROM events e LEFT JOIN users u ON e.owner=u.id LEFT JOIN devices d ON e.device=d.id ORDER BY e.id DESC LIMIT 60'),
-    shares: await all(env, 'SELECT s.id,s.name,s.owner,COALESCE(e.path,s.root) root,s.enabled,s.created FROM shares s LEFT JOIN entities e ON e.owner=s.owner AND e.id=s.root_id ORDER BY s.created DESC'),
+    shares: await all(env, 'SELECT s.id,s.name,s.owner,COALESCE(e.path,s.root) root,s.enabled,s.created,CASE WHEN s.password=\'\' THEN 0 ELSE 1 END password_required FROM shares s LEFT JOIN entities e ON e.owner=s.owner AND e.id=s.root_id ORDER BY s.created DESC'),
     conflicts: await one(env, 'SELECT COUNT(*) total FROM conflicts WHERE resolved=0'), serverTime: Date.now()
   });
   if (path === '/api/admin/copy' && method === 'POST') {

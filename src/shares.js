@@ -1,4 +1,4 @@
-// 发布仅暴露选定目录中的有效文件；所有配置、子线路和脚本都校验独立只读凭证。
+// 发布只读目录，可公开或设密码；授权链接永久有效，主动改密码时撤销。
 import { assert, body, json, name, relativePath, inside } from './lib/http.js';
 import { digest, password, token, verify } from './lib/crypto.js';
 import { all, one, run } from './lib/db.js';
@@ -8,19 +8,24 @@ import { entities } from './sync/store.js';
 import { getContent } from './storage/content.js';
 
 async function issue(env, share, base) {
-  const raw = token(); const expires = Date.now() + 30 * 86400000;
-  await run(env, 'INSERT INTO share_tokens(hash,share_id,expires) VALUES(?,?,?)', await digest(raw), share.id, expires);
-  return { token: raw, expires, url: `${base}/share/${share.id}/index.json?token=${raw}` };
+  const url = `${base}/share/${share.id}/index.json`;
+  if (!share.password) return { token: null, expires: null, url };
+  const raw = token();
+  await run(env, 'INSERT INTO share_tokens(hash,share_id,expires) VALUES(?,?,0)', await digest(raw), share.id);
+  return { token: raw, expires: null, url: `${url}?token=${raw}` };
+}
+function validPassword(value) {
+  assert(typeof value === 'string' && (value.length === 0 || value.length >= 5) && value.length <= 200, 400, '分享密码可留空，设置时需要 5–200 个字符');
 }
 export async function manageShare(env, request, url) {
   if (url.pathname === '/api/admin/shares' && request.method === 'POST') {
     const input = await body(request); await ownerExists(env, input.owner);
-    assert(typeof input.password === 'string' && input.password.length >= 12 && input.password.length <= 200, 400, '分享密码需要 12–200 个字符');
+    input.password ??= ''; validPassword(input.password);
     const root = input.root ? relativePath(input.root) : '';
     const directory = root ? (await entities(env, input.owner)).find(r => r.path === root && r.kind === 'directory' && !r.deleted) : null;
     if (root) assert(directory, 400, '发布目录不存在');
     const shareId = crypto.randomUUID();
-    await run(env, 'INSERT INTO shares(id,name,owner,root,root_id,password,created) VALUES(?,?,?,?,?,?,?)', shareId, name(input.name), input.owner, root, directory?.id || null, await password(input.password), Date.now());
+    await run(env, 'INSERT INTO shares(id,name,owner,root,root_id,password,created) VALUES(?,?,?,?,?,?,?)', shareId, name(input.name), input.owner, root, directory?.id || null, input.password ? await password(input.password) : '', Date.now());
     return json({ id: shareId, entry: `${url.origin}/s/${shareId}` }, 201);
   }
   const match = url.pathname.match(/^\/api\/admin\/shares\/([^/]+)(\/token)?$/);
@@ -29,11 +34,11 @@ export async function manageShare(env, request, url) {
   if (match[2] && request.method === 'POST') { assert(share.enabled, 409, '接口已停用'); return json(await issue(env, share, url.origin)); }
   if (request.method === 'PATCH') {
     const input = await body(request);
-    if (input.password !== undefined) assert(typeof input.password === 'string' && input.password.length >= 12 && input.password.length <= 200, 400, '密码需要 12–200 个字符');
-    await env.DB.batch([
-      env.DB.prepare('UPDATE shares SET name=?,enabled=?,password=? WHERE id=?').bind(input.name === undefined ? share.name : name(input.name), input.enabled === undefined ? share.enabled : input.enabled ? 1 : 0, input.password === undefined ? share.password : await password(input.password), share.id),
-      env.DB.prepare('DELETE FROM share_tokens WHERE share_id=?').bind(share.id)
-    ]);
+    if (input.password !== undefined) validPassword(input.password);
+    const nextPassword = input.password === undefined ? share.password : input.password ? await password(input.password) : '';
+    const statements = [env.DB.prepare('UPDATE shares SET name=?,enabled=?,password=? WHERE id=?').bind(input.name === undefined ? share.name : name(input.name), input.enabled === undefined ? share.enabled : input.enabled ? 1 : 0, nextPassword, share.id)];
+    if (input.password !== undefined || input.revokeTokens === true) statements.push(env.DB.prepare('DELETE FROM share_tokens WHERE share_id=?').bind(share.id));
+    await env.DB.batch(statements);
     return json({ ok: true });
   }
   return null;
@@ -51,16 +56,17 @@ export async function shareRoute(env, request, url) {
     assert(directory && !directory.deleted && directory.enabled, 404, '发布目录已删除或停用');
     share.root = directory.path;
   }
+  if (match[2] === 'info' && request.method === 'GET') return json({ name: share.name, passwordRequired: !!share.password, url: share.password ? null : `${url.origin}/share/${share.id}/index.json` });
   if (match[2] === 'auth' && request.method === 'POST') {
     await throttle(env, request, `share:${share.id}`); const input = await body(request);
-    assert(typeof input.password === 'string' && input.password.length <= 200 && await verify(input.password, share.password), 401, '分享密码错误');
+    if (share.password) assert(typeof input.password === 'string' && input.password.length <= 200 && await verify(input.password, share.password), 401, '分享密码错误');
     return json(await issue(env, share, url.origin));
   }
   assert(request.method === 'GET', 405, '分享只允许读取');
   const raw = url.searchParams.get('token') || request.headers.get('authorization')?.replace(/^Bearer /, '');
-  assert(raw && await one(env, 'SELECT hash FROM share_tokens WHERE hash=? AND share_id=? AND expires>?', await digest(raw), share.id, Date.now()), 401, '需要分享密码授权', { authUrl: `/share/${share.id}/auth` });
+  if (share.password) assert(raw && await one(env, 'SELECT hash FROM share_tokens WHERE hash=? AND share_id=? AND (expires=0 OR expires>?)', await digest(raw), share.id, Date.now()), 401, '需要分享密码授权', { authUrl: `/share/${share.id}/auth` });
   const rows = publicFiles(await entities(env, share.owner), share.root);
-  const link = suffix => `${url.origin}/share/${share.id}/${suffix}?token=${encodeURIComponent(raw)}`;
+  const link = suffix => `${url.origin}/share/${share.id}/${suffix}${share.password ? `?token=${encodeURIComponent(raw)}` : ''}`;
   const fileUrl = file => link(`files/${file.id}/${encodeURIComponent(file.path.split('/').pop())}`);
   const scripts = rows.filter(r => /\.(py|js|php)$/i.test(r.path) && !/(^|\/)直播配置\//.test(r.path));
   const sites = list => list.map(r => ({ key: r.id, name: r.path.split('/').pop().replace(/\.[^.]+$/, ''), type: 3, api: fileUrl(r), searchable: 1, quickSearch: 1, filterable: 1 }));

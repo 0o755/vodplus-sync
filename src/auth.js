@@ -1,4 +1,4 @@
-// 管理员、设备和只读分享互不复用凭证；首次初始化必须持有部署密钥。
+// 管理员、设备和分享分别认证；无管理员时开放一次初始化。
 import { assert, body, json, name } from './lib/http.js';
 import { digest, equal, password, token, verify } from './lib/crypto.js';
 import { one, run } from './lib/db.js';
@@ -27,7 +27,7 @@ export async function device(env, request) {
 }
 function cookie(request, value, age) { return `vp_session=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${new URL(request.url).protocol === 'https:' ? '; Secure' : ''}`; }
 export async function authRoute(env, request, path) {
-  if (path === '/api/status' && request.method === 'GET') return json({ initialized: !!await one(env, 'SELECT id FROM administrators'), setupAvailable: !!env.BOOTSTRAP_SECRET });
+  if (path === '/api/status' && request.method === 'GET') return json({ initialized: !!await one(env, 'SELECT id FROM administrators') });
   if (path === '/api/logout' && request.method === 'POST') {
     await admin(env, request);
     const raw = request.headers.get('cookie').match(/vp_session=([a-f0-9]{64})/)[1];
@@ -49,9 +49,9 @@ export async function authRoute(env, request, path) {
     const row = await one(env, 'SELECT user_id FROM devices WHERE id=?', deviceId);
     return json({ deviceId, userId: row.user_id, token: credential }, 201);
   }
-  assert(typeof input.password === 'string' && input.password.length >= 12 && input.password.length <= 200, 400, '密码需要 12–200 个字符');
+  assert(typeof input.password === 'string' && input.password.length >= 5 && input.password.length <= 200, 400, '密码需要 5–200 个字符');
   if (path === '/api/setup') {
-    assert(env.BOOTSTRAP_SECRET?.length >= 32 && equal(input.secret, env.BOOTSTRAP_SECRET), 403, '初始化密钥错误或未配置');
+    assert(!await one(env, 'SELECT id FROM administrators'), 409, '管理员已经初始化');
     const result = await run(env, 'INSERT OR IGNORE INTO administrators(id,username,password) VALUES(1,?,?)', name(input.username), await password(input.password));
     assert(result.meta.changes === 1, 409, '管理员已经初始化');
   } else {

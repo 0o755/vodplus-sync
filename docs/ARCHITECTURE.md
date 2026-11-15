@@ -2,7 +2,7 @@
 
 ## 分层
 
-`worker.js` 负责请求分发和统一响应。`auth.js` 区分管理员 Cookie、设备 Bearer 和分享 Bearer。`admin.js` 管理人物/设备；`sync/` 负责实体与版本；`shares.js` 只读发布；`maintenance.js` 清理过期短期数据。前端是原生 ES modules，没有运行时 UI 框架和外部 CDN。
+`worker.js` 负责请求分发和统一响应。`auth.js` 区分管理员 Cookie、设备 Bearer 和分享 Bearer。`admin.js` 管理人物/设备；`sync/` 负责实体与版本；`shares.js` 只读发布；`maintenance.js` 清理过期短期数据。前端使用 Tailwind CSS 组件样式层和原生 ES modules。样式由构建脚本本地编译，无外部 CDN 或浏览器内 CSS 编译器。
 
 D1 的 `entities` 保存文件、目录、history、progress、search、config 当前状态。`storage/content.js` 将文件字节存入 D1 的 `file_contents` / `file_chunks`，按 owner/hash 隔离，同一空间内容可复用。客户端仍完整上传；服务端内部以 192 KiB 小块编码，单行约 256 KiB，避免接近 D1 的 2 MB 行限制。所有块在一个事务中写入，无需 R2。公共库是保留空间 `public`，设备同步凭证没有访问它的权限。
 
@@ -31,11 +31,11 @@ D1 的 `entities` 保存文件、目录、history、progress、search、config �
 
 ## 安全
 
-- 管理员初始化必须持有至少 32 位部署 Secret，单例 INSERT 防止抢注和重复初始化。
+- 无管理员时首次访问直接创建账号，管理员密码至少 5 位，不使用初始化密钥。单例 INSERT 保证并发初始化只有一个成功；已有管理员时拒绝再次创建。
 - 密码为独立随机盐的 PBKDF2-SHA256（100,000 轮；兼容 Workers Web Crypto）。随机凭证为 256 bit，只保存 SHA-256 摘要。
 - 管理员会话 12 小时，HttpOnly、SameSite=Strict，HTTPS 时 Secure。修改接口校验 Origin；不提供跨域 CORS。
 - 设备绑定码 10 分钟一次性，设备创建与消费码在事务中完成。设备 token 直到撤销或人物停用；切换人物必须使用另一绑定凭证。
-- 分享密码只能换取独立只读 token，30 天过期。所有子资源同样检查 token、分享状态、人物状态、目录范围和停用状态。
+- 分享密码可空，非空至少 5 位。公开接口及其子资源无需 token；密码接口使用永久只读 token。两种模式都检查分享/人物/目录状态及发布范围，均不能访问设备同步或管理员 API。修改密码或显式撤销会删除旧 token，单纯改名不影响永久链接。
 - 登录、绑定、初始化、分享密码验证使用 D1 原子计数，按来源 IP/接口每十分钟最多 15 次尝试。
 - 路径拒绝绝对路径、反斜杠、冒号、点路径、控制符、百分号编码和 Windows 保留名。设备还须防止自身资源根目录中的符号链接逃逸。
 - 返回 CSP、no-store、nosniff、no-referrer；脚本内容作为纯文本下载，不执行在后台页面中。所有前端用户文本先转义。

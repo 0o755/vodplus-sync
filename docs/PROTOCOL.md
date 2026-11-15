@@ -15,7 +15,7 @@ Content-Type: application/json
 
 返回 201：`{ deviceId, userId, token }`。此后所有 `/api/sync/*` 使用 `Authorization: Bearer <token>`。接口从凭证确定 owner，不信任请求中的 userId，也没有设备自动注册人物的接口。
 
-管理员使用 `/api/setup` 和 `/api/login` 建立 Cookie 会话；不将管理员密码或 Cookie交给 App。
+管理员使用 `/api/setup` 和 `/api/login` 建立 Cookie 会话。空库可直接 POST `{username,password}` 到 setup，密码最低 5 位；已有管理员返回 409。不需要初始化 Secret，不将管理员密码或 Cookie 交给 App。
 
 ## 文件完整上传
 
@@ -126,11 +126,11 @@ Content-Type: application/json
 {"password":"分享密码"}
 ```
 
-返回 `{ token, expires, url }`。`url` 是带短期只读凭证的 index.json，可直接作为配置入口。脚本、JSON 子配置和生成的多线路 URL 都含同范围凭证。
+返回 `{ token, expires: null, url }`，链接永久有效。密码接口的 index.json、脚本、JSON 子配置和多线路 URL 都含同范围只读 token。空密码接口不需要验证，直接 GET `/share/<id>/index.json`，所有生成的子 URL 不含 token。`GET /share/<id>/info` 返回 name/passwordRequired 及公开接口 URL。
 
 也可以使用 Bearer 访问分享接口，但生成的子 URL 仍会携带 token，以兼容不能给每次脚本下载加 Header 的现有 App。分享 token 无法访问 `/api/sync/*` 或管理员接口。管理员 Cookie 也不能替代分享 token 读取子文件。
 
-密码错误 401，尝试过多 429，接口/人物/目录停用 404，token 到期或撤销 401。换取 token 的口令只通过 POST 传输，不写到 URL。
+密码错误 401，尝试过多 429，接口/人物/目录停用 404，token 被撤销后返回 401；永久 token 不按时间过期。换取 token 的口令只通过 POST 传输，不写到 URL。
 
 ## 管理 API 速查
 
@@ -153,7 +153,7 @@ Content-Type: application/json
 | POST `/api/admin/spaces/:owner/resolve/:id` | 关闭候选，采用需先正常提交 |
 | POST `/api/admin/copy` | 公共文件复制：owner/fileId/sourceVersion/id/opId/path |
 | POST `/api/admin/shares` | name/owner/root/password |
-| PATCH `/api/admin/shares/:id` | name/enabled/password，撤销旧 token |
+| PATCH `/api/admin/shares/:id` | name/enabled/password；显式修改密码或 revokeTokens=true 撤销旧 token |
 | POST `/api/admin/shares/:id/token` | 管理员签发只读 URL |
 
-401 重新绑定/登录；403 权限或初始化密钥问题；409 冲突等待处理；413 缩小单次数据；422 校验/配置引用错误；429 延后重试；5xx 指数退避并保留队列。重试增加随机抖动，App 非活跃期间不无限循环。
+401 重新绑定/登录；403 权限或跨站请求问题；409 冲突等待处理；413 缩小单次数据；422 校验/配置引用错误；429 延后重试；5xx 指数退避并保留队列。重试增加随机抖动，App 非活跃期间不无限循环。

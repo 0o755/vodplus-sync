@@ -2,6 +2,7 @@
 import { $, api, send, esc, time, badge, on, form, toast, ownerOptions, table, empty, setUnsaved } from '../ui.js';
 import { openEditor } from './file-editor.js';
 import { showConflicts } from './revisions.js';
+import { icon } from '../icons.js';
 export async function hashBytes(bytes) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join(''); }
 export async function putFile(base, bytes) { const hash=await hashBytes(bytes);await api(`${base}/blobs/${hash}`,{method:'PUT',body:bytes});return {hash,size:bytes.byteLength}; }
 export async function filesPage({data}) {
@@ -14,7 +15,7 @@ export async function filesPage({data}) {
   const edit=async row=>{selected=row;dirty=false;setUnsaved(false);renderTree();await openEditor({row,rows,base:base(),refresh,users:data.users,onDirty:value=>{dirty=value;setUnsaved(value);}});};
   function renderTree(){
     const list=rows.filter(r=>(view==='files'?r.path:!r.path)&&!!r.deleted===deleted&&String(r.path||r.data.key).toLowerCase().includes(filter.toLowerCase()));
-    $('#tree').innerHTML=list.length?list.map(r=>`<button class="tree-row depth-${Math.min((r.path?.split('/').length||1)-1,5)} ${selected?.id===r.id?'selected':''}" data-file="${r.id}"><span class="file-icon">${r.kind==='directory'?'▰':r.kind==='file'?'▤':'◷'}</span><span>${esc(r.path?.split('/').pop()||r.data.title||r.data.key)}</span>${!r.enabled?'<i>停用</i>':''}</button>`).join(''):empty(deleted?'回收站为空':'这里还没有内容',view==='files'?'新建目录或上传第一个文件。':'设备同步后，历史、进度和搜索会出现在这里。');
+    $('#tree').innerHTML=list.length?list.map(r=>`<button class="tree-row depth-${Math.min((r.path?.split('/').length||1)-1,5)} ${selected?.id===r.id?'selected':''}" data-file="${r.id}"><span class="file-icon">${icon(r.kind==='directory'?'folder':r.kind==='file'?'file':'clock')}</span><span>${esc(r.path?.split('/').pop()||r.data.title||r.data.key)}</span>${!r.enabled?'<i>停用</i>':''}</button>`).join(''):empty(deleted?'回收站为空':'这里还没有内容',view==='files'?'新建目录或上传第一个文件。':'设备同步后，历史、进度和搜索会出现在这里。');
     $('#library-count').textContent=`${list.length} 项 · ${owners.find(o=>o.value===owner).label}`;
     for(const r of list)on(`[data-file="${r.id}"]`,'click',async()=>{if(warn())await edit(r);});
   }

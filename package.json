@@ -9,27 +9,27 @@
   },
   "cloudflare": {
     "bindings": {
-      "BOOTSTRAP_SECRET": {
-        "description": "首次初始化管理员所需的随机密钥，至少 32 位；不能留空或使用示例值。初始化完成后可删除。"
-      },
       "DB": {
         "description": "人物、设备、文件内容、版本及同步记录。仅需 D1，无需开通 R2；部署脚本自动初始化。"
       }
     }
   },
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "node scripts/dev.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "check": "node scripts/check.mjs",
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "build": "node scripts/build.mjs",
+    "styles": "node scripts/styles.mjs",
     "deploy": "node scripts/deploy.mjs",
     "db:local": "wrangler d1 migrations apply DB --local",
     "db:remote": "wrangler d1 migrations apply DB --remote"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "4.3.5",
     "esbuild": "0.28.2",
     "jsonc-parser": "3.3.1",
     "miniflare": "4.20260730.0",
+    "tailwindcss": "4.3.5",
     "wrangler": "4.162.0"
   }
 }

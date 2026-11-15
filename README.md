@@ -5,7 +5,7 @@
 - **人物隔离**：后台预建用户，一次性绑定设备。观看历史、进度、搜索和配置分别归属各人物。
 - **文件管理**：目录树、上传、编辑、移动、重命名、停用、回收站、版本恢复与冲突处理。
 - **按变化同步**：完整文件上传，SHA-256 校验，版本比较、幂等回执和游标增量；无长连接。
-- **只读分享**：选择目录并设置密码，生成点播、多线路与直播配置，脚本和嵌套配置同样需要授权。
+- **只读分享**：配置链接永久有效；密码可留空公开访问，设置时最低 5 位。脚本、子线路和嵌套配置沿用对应访问方式。
 - **公共爬虫库**：可独立发布，也可显式复制给用户；复制后各自维护。
 - **轻量部署**：Workers 提供接口和静态后台，D1 同时保存元数据和文件内容；没有常驻应用服务器。
 
@@ -19,7 +19,7 @@ npm run db:local
 npm run dev
 ```
 
-先将 `.dev.vars.example` 复制为 `.dev.vars`，为 `BOOTSTRAP_SECRET` 填入至少 32 位随机值。打开开发服务后，用该密钥创建管理员，管理员密码至少 12 位。**没有内置默认管理员或默认口令。**
+首次打开服务时，如果没有管理员，会直接进入创建账号页面。设置管理员账号和至少 **5 位密码**即可，无需配置初始化密钥。已有管理员时显示登录页。
 
 登录后：创建人物 → 生成绑定码 → 上传资源 → 按需发布带密码的接口。后台现已可独立管理资源；ys 的设备同步需要按 [App 接入](docs/APP_INTEGRATION.md) 实现客户端适配。
 
@@ -31,13 +31,19 @@ npm run dev
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2F0o755%2Fvodplus-sync)
 <!-- deploy-button:end -->
 
-源码仓库：[0o755/vodplus-sync](https://github.com/0o755/vodplus-sync)。点击按钮后在自己的 Cloudflare 账户中确认资源并设置初始化密钥；仓库不会代为开通付费资源。
+源码仓库：[0o755/vodplus-sync](https://github.com/0o755/vodplus-sync)。已有该仓库的使用者，请在 Cloudflare 将现有 Worker 直接关联此仓库的 main 分支；以后推送会自动更新。上面的按钮用于首次安装，会复制一份仓库，不是日常重新部署入口。
 
 ## 文档
 
+新版界面使用 Tailwind CSS，采用中性灰白配色、紧凑表格和统一弹窗：
+
+![后台概览](docs/ui-overview.jpg)
+
+[发布弹窗预览](docs/ui-publish.jpg) · [文件编辑器预览](docs/ui-files.jpg)
+
 | 文档 | 内容 |
 |---|---|
-| [部署](docs/DEPLOY.md) | Deploy 按钮、资源初始化、Secrets、本地开发与升级 |
+| [部署](docs/DEPLOY.md) | 现有仓库自动部署、首次安装、本地开发与升级 |
 | [使用](docs/USAGE.md) | 用户、设备、文件、公共库和配置分享 |
 | [架构](docs/ARCHITECTURE.md) | 权限、事务、冲突、存储生命周期与当前边界 |
 | [同步协议](docs/PROTOCOL.md) | 绑定、上传、提交、游标、记录身份与错误处理 |
@@ -49,7 +55,8 @@ npm run dev
 
 ```text
 src/             Worker 路由、认证、同步与分享模块
-web/             无框架管理界面与独立页面模块
+web/             后台页面模块与编译后的静态资源
+styles/          Tailwind CSS 入口、控件与工作区样式
 migrations/      D1 有序迁移
 examples/        App 协议参考实现
 tests/           workerd + D1 集成测试与部署流程回归

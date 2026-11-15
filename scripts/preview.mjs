@@ -1,8 +1,11 @@
 // 临时浏览器验收服务：仅监听回环，演示数据全部保存在内存，退出即销毁。
 import { createServer } from 'node:http';
 import { createHarness } from '../tests/harness.js';
-const h=await createHarness({assets:true});
-for(const name of ['林女士','小满','父亲']){
+import { buildStyles } from './styles.mjs';
+buildStyles();
+const setupOnly=process.argv.includes('--setup');
+const h=await createHarness({assets:true,setup:!setupOnly});
+for(const name of setupOnly?[]:['林女士','小满','父亲']){
   const owner=await h.createUser(name);const device=await h.bind(owner,name);
   await h.request(`/api/admin/devices/${device.deviceId}`,{method:'PATCH',data:{name:name==='林女士'?'客厅电视':name==='小满'?'学习平板':'父亲的手机'}});
   for(const path of ['影视线路','直播配置'])await h.request(`/api/admin/spaces/${owner}/commit`,{method:'POST',data:{opId:crypto.randomUUID(),patch:{id:crypto.randomUUID(),kind:'directory',path,baseVersion:0}}});
@@ -10,7 +13,7 @@ for(const name of ['林女士','小满','父亲']){
   await h.put(owner,'直播配置/example.m3u','#EXTM3U\n');
   if(name==='林女士')await h.request('/api/admin/shares',{method:'POST',data:{owner,name:'家庭点播',root:'影视线路',password:'preview-password-123'}});
 }
-await h.put('public','example.js','// 公共示例，不包含真实来源。\nexport const name = "公共资源";\n');
+if(!setupOnly)await h.put('public','example.js','// 公共示例，不包含真实来源。\nexport const name = "公共资源";\n');
 const server=createServer(async(req,res)=>{
   try{
     const response=await h.mf.dispatchFetch('http://127.0.0.1:8799'+req.url,{method:req.method,headers:req.headers,body:['GET','HEAD'].includes(req.method)?undefined:req,duplex:'half'});

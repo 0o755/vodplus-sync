@@ -3,16 +3,15 @@ import { Miniflare } from 'miniflare';
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-export const secret='test-only-bootstrap-secret-not-for-deployment';
 export const digest=value=>createHash('sha256').update(value).digest('hex');
-export async function createHarness({assets=false}={}){
+export async function createHarness({assets=false,setup=true}={}){
   const bundle=await build({entryPoints:['src/worker.js'],bundle:true,write:false,format:'esm',platform:'browser'});
   const staticFiles=new Map();
   if(assets){
-    const files=['index.html','styles.css','app.js','ui.js','share.html','share.js','deploy.html','deploy.js','pages/overview.js','pages/people.js','pages/files.js','pages/file-editor.js','pages/revisions.js'];
+    const files=['index.html','styles.css','app.js','ui.js','icons.js','share.html','share.js','deploy.html','deploy.js','pages/overview.js','pages/shares.js','pages/people.js','pages/files.js','pages/file-editor.js','pages/revisions.js'];
     for(const file of files)staticFiles.set('/'+file,await readFile(new URL('../web/'+file,import.meta.url)));
   }
-  const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',d1Databases:['DB'],bindings:{BOOTSTRAP_SECRET:secret},serviceBindings:{ASSETS:request=>{
+  const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-07-30',d1Databases:['DB'],serviceBindings:{ASSETS:request=>{
     const path=new URL(request.url).pathname;const file=path==='/'?'/index.html':path;
     return staticFiles.has(file)?new Response(staticFiles.get(file),{headers:{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html; charset=utf-8'}}):new Response('Not found',{status:404});
   }}});
@@ -23,14 +22,18 @@ export async function createHarness({assets=false}={}){
   for(const trigger of triggers)await db.prepare(trigger).run();
   const fileSql=(await readFile(new URL('../migrations/0002_d1_files.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
   for(const statement of fileSql.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+  const shareSql=(await readFile(new URL('../migrations/0003_permanent_shares.sql',import.meta.url),'utf8')).replace(/^--.*$/gm,'');
+  await db.prepare(shareSql).run();
   let cookie='';
   const request=async(path,{method='GET',data,token,admin=true,raw,headers={}}={})=>{
     const response=await mf.dispatchFetch('http://localhost'+path,{method,headers:{...(admin&&cookie?{cookie}:{}),...(token?{authorization:`Bearer ${token}`} : {}),...(data?{'content-type':'application/json'}:{}),...headers},body:data?JSON.stringify(data):raw});
     const text=await response.text();let value;try{value=JSON.parse(text);}catch{value=text;}
     return {status:response.status,value,headers:response.headers};
   };
-  const setup=await request('/api/setup',{method:'POST',data:{secret,username:'admin',password:'test-password-1234'}});
-  if(setup.status!==200)throw new Error(JSON.stringify(setup.value));cookie=setup.headers.get('set-cookie').split(';')[0];
+  if(setup){
+    const response=await request('/api/setup',{method:'POST',data:{username:'admin',password:'test-password-1234'}});
+    if(response.status!==200)throw new Error(JSON.stringify(response.value));cookie=response.headers.get('set-cookie').split(';')[0];
+  }
   const createUser=async name=>(await request('/api/admin/users',{method:'POST',data:{name}})).value.id;
   const bind=async(userId,username)=>{const code=(await request(`/api/admin/users/${userId}/binding`,{method:'POST',data:{}})).value.code;return (await request('/api/bind',{method:'POST',admin:false,data:{code,username,deviceName:'测试设备'}})).value;};
   const put=async(owner,path,text='print("hello")',extra={})=>{

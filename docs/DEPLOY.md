@@ -2,13 +2,22 @@
 
 当前版本仅使用 Workers 与 D1，文件、版本和用户记录都存放在 D1。**不使用 R2，不需要开通 R2 或填写其信用卡、账单地址等支付资料。** 可以使用 Cloudflare 免费计划部署。
 
-## 直接部署
+## 已有仓库：连接一次，后续自动更新
 
-1. 打开 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2F0o755%2Fvodplus-sync)，连接 GitHub。
+你已经拥有 `0o755/vodplus-sync` 时，优先使用现有 Worker：
+
+1. Cloudflare → Workers 和 Pages → 选择 Worker → 设置 → 构建。
+2. 将 Git 仓库连接到 `0o755/vodplus-sync`，生产分支选择 `main`。若当前连接了另一份副本，先断开构建连接，再重新选择原仓库。
+3. 构建命令填 `npm run build`，部署命令填 `npm run deploy`，根目录为仓库根目录。
+4. 后续向原仓库推送会自动构建、迁移并更新同一个 Worker，无需再次点模板部署按钮。
+
+## 使用模板首次安装
+
+1. 打开 [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2F0o755%2Fvodplus-sync)，连接 GitHub。此流程会在你的账号复制一份仓库，只用于首次安装。
 2. D1 选择“新建”；如果此前失败部署已经创建了数据库，可以选择该已有数据库。位置保持 Automatic，暂不启用读取复制。
-3. 填写 `BOOTSTRAP_SECRET`：至少 32 位随机密钥，保存下来用于首次初始化。
+3. 无需填写初始化密钥或 Secrets。
 4. 保留构建命令 `npm run build`、部署命令 `npm run deploy`，点击“部署”。
-5. 成功后打开 Worker 地址，用初始化密钥创建后台管理员账号与密码。管理员密码至少 12 位；初始化成功后可删除 Cloudflare 中的 BOOTSTRAP_SECRET。
+5. 成功后打开 Worker 地址，没有管理员时直接创建账号，密码最低 5 位。已有账号时进入登录页。
 
 新的部署页面应只出现 D1，不再要求 R2。若仍看到 R2，说明当前打开的是旧模板或旧代码，需要关闭旧创建流程，从最新 README 的按钮重新进入。
 
@@ -32,7 +41,7 @@ Cloudflare 可能要求新建 Git 仓库；如果名称与已有仓库冲突，�
 
 1. 用 Wrangler 列出 D1，按已选 ID 或名称复用；仅在没有指定 ID 且同名库不存在时创建。
 2. 将确认后的真实数据库 ID 写入本次临时配置。
-3. 用该配置执行 `d1 migrations apply DB --remote`，包括初始元数据表和 `0002_d1_files.sql` 文件存储表。
+3. 用该配置执行 `d1 migrations apply DB --remote`，包括初始元数据表、D1 文件存储表和 `0003_permanent_shares.sql` 永久分享迁移。
 4. 迁移成功后，使用同一配置发布 Worker。
 5. 无论成功失败，删除临时配置。
 
@@ -48,17 +57,16 @@ npm run db:local
 npm run dev
 ```
 
-把 `.dev.vars.example` 复制为 `.dev.vars`，为 BOOTSTRAP_SECRET 填入随机值。本地文件不上传 GitHub。
+本地无需创建密钥配置文件，启动后打开页面创建管理员即可。
 
 手动远端部署可使用：
 
 ```text
 npx wrangler login
 npm run deploy
-npx wrangler secret put BOOTSTRAP_SECRET
 ```
 
-部署脚本会处理数据库创建和迁移。手动流程中先完成部署，再设置初始化 Secret；Secret 未设置时不允许任何访客创建管理员。Deploy 按钮流程会在页面中要求填写该 Secret。
+部署脚本自动处理数据库创建、迁移和 Tailwind 样式构建。首次访问空库即可初始化；完成后不会再次开放创建管理员。
 
 ## 免费额度与容量
 
@@ -72,7 +80,7 @@ D1 免费计划每个数据库最多 **500 MB**，账户总计 5 GB；每天有 
 
 - 保留既有 D1 ID；不要为了升级删除或换库。
 - 新增迁移文件，不修改已应用的历史迁移。升级会跳过已应用的迁移。
-- 每天 03:17 UTC 清理过期会话、绑定码、分享凭证、限速记录和 30 天前的操作日志。
+- 每天 03:17 UTC 清理过期会话、绑定码、旧版有限期分享凭证、限速记录和 30 天前的操作日志。
 - 自动清理不触及文件内容、幂等回执、墓碑和增量日志。
 - 大规模或破坏性迁移前导出备份。若未来增加旧版本清理，必须同时设计游标过期和重新拉取协议。
 - 默认关闭请求日志采集，避免分享 token 出现在访问日志中。

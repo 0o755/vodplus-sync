@@ -1,14 +1,14 @@
 // 验证长离线、分页上界、公共复制及客户端丢响应后的恢复行为。
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {createHarness,digest,secret} from './harness.js';
+import {createHarness,digest} from './harness.js';
 import {SyncClient} from '../examples/sync-client.js';
 let h,owner,device;
 before(async()=>{h=await createHarness();owner=await h.createUser('边界测试');device=await h.bind(owner,'边界测试');});
 after(async()=>h?.dispose());
 const commit=patch=>h.request(`/api/admin/spaces/${owner}/commit`,{method:'POST',data:{opId:crypto.randomUUID(),patch}});
 test('已初始化管理员不能被覆盖，空 JSON 请求返回明确错误',async()=>{
-  assert.equal((await h.request('/api/setup',{method:'POST',data:{secret,username:'new-admin',password:'test-password-1234'}})).status,409);
+  assert.equal((await h.request('/api/setup',{method:'POST',data:{username:'new-admin',password:'test-password-1234'}})).status,409);
   assert.equal((await h.request('/api/admin/users',{method:'POST',raw:'null',headers:{'content-type':'application/json'}})).status,400);
 });
 test('同一绑定码并发领取只有一台设备成功',async()=>{
